@@ -6,6 +6,7 @@ import (
 	"embed"
 	"fmt"
 	"sync"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -115,10 +116,16 @@ func (d *DB) exec(req writeReq) error {
 
 func (d *DB) Close() error {
 	d.once.Do(func() { close(d.done) })
-	errW := d.wdb.Close()
+	// Close the readers first, then checkpoint and truncate the write-ahead log,
+	// then close the writer last. SQLite removes -wal/-shm when the final
+	// connection closes, so this leaves a single .db file behind: "your data is
+	// one file" is then true on disk, not just in the schema.
 	errR := d.rdb.Close()
-	if errW != nil {
-		return errW
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	_, _ = d.wdb.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)")
+	cancel()
+	if err := d.wdb.Close(); err != nil {
+		return err
 	}
 	return errR
 }
