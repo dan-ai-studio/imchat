@@ -44,8 +44,10 @@ func (b *Bus) Publish(subject string, data []byte) error {
 	return b.nc.Publish(subject, data)
 }
 
-func (b *Bus) Subscribe(subject string, fn func([]byte)) (*nats.Subscription, error) {
-	return b.nc.Subscribe(subject, func(m *nats.Msg) { fn(m.Data) })
+func (b *Bus) Subscribe(subject string, fn func(subject string, data []byte)) (*nats.Subscription, error) {
+	return b.nc.Subscribe(subject, func(m *nats.Msg) {
+		fn(m.Subject, m.Data)
+	})
 }
 
 func (b *Bus) Flush() error { return b.nc.Flush() }

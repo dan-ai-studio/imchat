@@ -2,23 +2,30 @@ package main
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"flag"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
+	"imchat/internal/api"
+	"imchat/internal/auth"
 	"imchat/internal/bus"
+	"imchat/internal/delivery"
 	"imchat/internal/store"
+	"imchat/internal/ws"
 )
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8080", "listen address")
 	dbPath := flag.String("db", filepath.Join("data", "imchat.db"), "sqlite file path")
+	seed := flag.Bool("seed", true, "create demo users and a dm on first run")
 	flag.Parse()
 
 	if err := os.MkdirAll(filepath.Dir(*dbPath), 0o755); err != nil {
@@ -31,7 +38,9 @@ func main() {
 	}
 	defer db.Close()
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	if err := db.Migrate(ctx); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
@@ -42,29 +51,37 @@ func main() {
 	}
 	defer b.Close()
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":           true,
-			"bus":          "nats-inprocess",
-			"schema":       store.SchemaVersion,
-			"delivery":     "at-least-once",
-		})
-	})
-	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte("<!doctype html><meta charset=utf-8><title>imchat</title><h1>imchat</h1><p>skeleton up. next: websocket + messages.</p>"))
-	})
+	hub := ws.NewHub()
+	if _, err := b.Subscribe("user.*", func(subject string, data []byte) {
+		id, err := strconv.ParseInt(strings.TrimPrefix(subject, "user."), 10, 64)
+		if err != nil {
+			return
+		}
+		hub.Deliver(id, data)
+	}); err != nil {
+		log.Fatalf("subscribe: %v", err)
+	}
+
+	am := auth.NewManager(db, 7*24*time.Hour)
+
+	srvAPI := &api.Server{DB: db, Auth: am, Hub: hub}
+	disp := delivery.New(db, b)
+	srvAPI.Dispatcher = disp
+	go disp.Run(ctx)
+
+	if *seed {
+		seedDemo(ctx, am, db)
+	}
 
 	srv := &http.Server{
 		Addr:              *addr,
-		Handler:           mux,
+		Handler:           srvAPI.Router(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
 	go func() {
 		log.Printf("imchat listening on http://%s (db=%s)", *addr, *dbPath)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("http: %v", err)
 		}
 	}()
@@ -73,14 +90,37 @@ func main() {
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	<-stop
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	cancel()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
 	_ = srv.Shutdown(shutdownCtx)
 	log.Print("imchat stopped")
 }
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+func seedDemo(ctx context.Context, am *auth.Manager, db *store.DB) {
+	if _, _, err := db.UserByUsername(ctx, "alice"); err == nil {
+		return
+	}
+	alice, err := am.Register(ctx, "alice", "Alice", "password123", true)
+	if err != nil {
+		log.Printf("seed alice: %v", err)
+		return
+	}
+	bob, err := am.Register(ctx, "bob", "Bob", "password123", false)
+	if err != nil {
+		log.Printf("seed bob: %v", err)
+		return
+	}
+	c, err := db.CreateConversation(ctx, "dm", "", alice.ID)
+	if err != nil {
+		log.Printf("seed conversation: %v", err)
+		return
+	}
+	if err := db.AddMember(ctx, c.ID, alice.ID, "owner"); err != nil {
+		log.Printf("seed alice member: %v", err)
+	}
+	if err := db.AddMember(ctx, c.ID, bob.ID, "member"); err != nil {
+		log.Printf("seed bob member: %v", err)
+	}
+	log.Printf("seeded: alice/bob (password123), conversation %d", c.ID)
 }
