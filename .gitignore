@@ -5,9 +5,8 @@
 # runtime data (sqlite file + wal/shm + uploads + logs)
 /data/
 
-# frontend
+# frontend deps (dist IS committed so "go build" works on a fresh clone)
 web/node_modules/
-web/dist/
 web/.vite/
 
 # editor / os

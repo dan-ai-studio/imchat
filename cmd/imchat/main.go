@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -20,6 +21,7 @@ import (
 	"imchat/internal/delivery"
 	"imchat/internal/store"
 	"imchat/internal/ws"
+	webui "imchat/web"
 )
 
 func main() {
@@ -75,7 +77,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              *addr,
-		Handler:           srvAPI.Router(),
+		Handler:           assemble(srvAPI.Router()),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -95,6 +97,32 @@ func main() {
 	defer shutdownCancel()
 	_ = srv.Shutdown(shutdownCtx)
 	log.Print("imchat stopped")
+}
+
+// assemble routes api and websocket traffic to the api handler and everything
+// else to the embedded frontend, falling back to index.html so the client can
+// own its own routes.
+func assemble(apiHandler http.Handler) http.Handler {
+	sub, err := webui.FS()
+	if err != nil {
+		log.Printf("web assets unavailable: %v", err)
+		return apiHandler
+	}
+	files := http.FileServer(http.FS(sub))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		if p == "/ws" || p == "/healthz" || strings.HasPrefix(p, "/api/") {
+			apiHandler.ServeHTTP(w, r)
+			return
+		}
+		if _, err := fs.Stat(sub, strings.TrimPrefix(p, "/")); err == nil {
+			files.ServeHTTP(w, r)
+			return
+		}
+		clone := r.Clone(r.Context())
+		clone.URL.Path = "/"
+		files.ServeHTTP(w, clone)
+	})
 }
 
 func seedDemo(ctx context.Context, am *auth.Manager, db *store.DB) {
