@@ -55,6 +55,16 @@ func (s *Server) Router() http.Handler {
 		r.Post("/api/conversations/{id}/send", s.handleSend)
 		r.Get("/api/stats", s.handleStats)
 		r.Get("/ws", s.handleWS)
+
+		r.Route("/api/admin", func(r chi.Router) {
+			r.Use(s.requireAdmin)
+			r.Get("/stats", s.handleAdminStats)
+			r.Get("/users", s.handleAdminUsers)
+			r.Post("/users/{id}/status", s.handleAdminUserStatus)
+			r.Post("/users/{id}/kick", s.handleAdminKick)
+			r.Get("/conversations", s.handleAdminConversations)
+			r.Get("/messages", s.handleAdminMessages)
+		})
 	})
 
 	return r

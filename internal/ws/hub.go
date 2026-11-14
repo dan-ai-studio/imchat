@@ -62,3 +62,19 @@ func (h *Hub) Connections() int {
 	}
 	return n
 }
+
+// DisconnectUser closes every live connection of one user and returns how many
+// were closed. This is the platform-admin "kick" action: it acts on connections,
+// never on conversation membership.
+func (h *Hub) DisconnectUser(userID int64) int {
+	h.mu.RLock()
+	targets := make([]*Conn, 0, len(h.conns[userID]))
+	for c := range h.conns[userID] {
+		targets = append(targets, c)
+	}
+	h.mu.RUnlock()
+	for _, c := range targets {
+		c.Close()
+	}
+	return len(targets)
+}

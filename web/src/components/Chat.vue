@@ -178,6 +178,10 @@ async function refreshStats() {
   }
 }
 
+function openAdmin() {
+  location.hash = '#/admin'
+}
+
 async function logout() {
   manualDown = true
   ws?.close()
@@ -229,6 +233,7 @@ watch(activeId, () => (gapNotice.value = ''))
         <div class="stat">连接 <b>{{ statusText }}</b></div>
         <div class="stat">待投递 <b>{{ Object.entries(stats).map(([k, v]) => k + ':' + v).join(' ') || '—' }}</b></div>
         <button class="ghost" @click="simulateDrop">模拟断网</button>
+        <button v-if="me.is_admin" class="ghost" @click="openAdmin">管理台</button>
         <button class="ghost" @click="logout">退出</button>
       </div>
     </aside>
