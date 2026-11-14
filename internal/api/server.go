@@ -50,7 +50,13 @@ func (s *Server) Router() http.Handler {
 	r.Group(func(r chi.Router) {
 		r.Use(s.requireAuth)
 		r.Get("/api/me", s.handleMe)
+		r.Get("/api/users", s.handleUsers)
 		r.Get("/api/conversations", s.handleConversations)
+		r.Post("/api/conversations", s.handleCreateConversation)
+		r.Get("/api/conversations/{id}/members", s.handleMembers)
+		r.Post("/api/conversations/{id}/members", s.handleAddMember)
+		r.Delete("/api/conversations/{id}/members/{uid}", s.handleRemoveMember)
+		r.Post("/api/conversations/{id}/members/{uid}/mute", s.handleMuteMember)
 		r.Get("/api/conversations/{id}/messages", s.handleMessages)
 		r.Post("/api/conversations/{id}/send", s.handleSend)
 		r.Post("/api/conversations/{id}/recall", s.handleRecall)
@@ -248,6 +254,9 @@ func (s *Server) SendMessage(ctx context.Context, userID, convID int64, clientMs
 	}
 	if kind == "text" && strings.TrimSpace(body) == "" {
 		return nil, errors.New("empty message")
+	}
+	if until, err := s.DB.MutedUntil(ctx, convID, userID); err == nil && until > time.Now().UnixMilli() {
+		return nil, errors.New("you are muted in this conversation")
 	}
 	members, err := s.DB.Members(ctx, convID)
 	if err != nil {

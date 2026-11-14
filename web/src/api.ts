@@ -53,6 +53,18 @@ export const api = {
   me: () => req<Me>('/api/me'),
   login: (username: string, password: string) => req<Me>('/api/login', json({ username, password })),
   logout: () => req<{ ok: boolean }>('/api/logout', { method: 'POST' }),
+  users: () =>
+    req<{ users: Array<{ id: number; username: string; display_name: string }> }>('/api/users'),
+  createGroup: (title: string, members: number[]) =>
+    req<{ id: number; title: string }>('/api/conversations', json({ kind: 'group', title, members })),
+  members: (id: number) =>
+    req<{ members: Array<{ user_id: number; username: string; display_name: string; role: string; muted: boolean }> }>(
+      '/api/conversations/' + id + '/members',
+    ),
+  muteMember: (id: number, uid: number, minutes: number) =>
+    req<{ ok: boolean }>('/api/conversations/' + id + '/members/' + uid + '/mute', json({ minutes })),
+  removeMember: (id: number, uid: number) =>
+    req<{ ok: boolean }>('/api/conversations/' + id + '/members/' + uid, { method: 'DELETE' }),
   conversations: () => req<{ conversations: Conversation[] }>('/api/conversations'),
   messages: (id: number, after = 0) =>
     req<{ messages: Message[] }>('/api/conversations/' + id + '/messages?after=' + after + '&limit=300'),
