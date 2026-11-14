@@ -4,7 +4,7 @@ import "encoding/json"
 
 // FrameJSON renders the wire frame for one due delivery.
 func FrameJSON(e *DueEntry) []byte {
-	b, err := json.Marshal(map[string]any{
+	payload := map[string]any{
 		"type":            "msg",
 		"conversation_id": e.ConversationID,
 		"seq":             e.Seq,
@@ -13,7 +13,11 @@ func FrameJSON(e *DueEntry) []byte {
 		"kind":            e.Kind,
 		"body":            e.Body,
 		"created_at":      e.CreatedAt,
-	})
+	}
+	if e.RecallOf > 0 {
+		payload["recall_of"] = e.RecallOf
+	}
+	b, err := json.Marshal(payload)
 	if err != nil {
 		return []byte("{}")
 	}

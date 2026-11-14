@@ -20,6 +20,7 @@ export interface Message {
   sender_id: number
   kind: string
   body: string
+  recall_of?: number
   created_at: number
 }
 
@@ -57,6 +58,8 @@ export const api = {
     req<{ messages: Message[] }>('/api/conversations/' + id + '/messages?after=' + after + '&limit=300'),
   send: (id: number, body: string, clientMsgId: string) =>
     req<{ seq: number; id: string }>('/api/conversations/' + id + '/send', json({ client_msg_id: clientMsgId, body })),
+  recall: (id: number, seq: number) =>
+    req<{ seq: number; recall_of: number }>('/api/conversations/' + id + '/recall', json({ seq })),
   stats: () => req<{ outbox: Record<string, number>; ws_conns: number }>('/api/stats'),
 
   adminStats: () =>

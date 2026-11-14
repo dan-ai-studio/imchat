@@ -11,10 +11,17 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 //go:embed schema.sql
 var schemaFS embed.FS
+
+// upgrades maps "current version" to the statements that move it up one step.
+// A fresh database applies schema.sql (already at the latest shape) and skips
+// this entirely; an existing database walks these in order.
+var upgrades = map[int][]string{
+	1: {"ALTER TABLE messages ADD COLUMN recall_of INTEGER NOT NULL DEFAULT 0"},
+}
 
 type writeReq struct {
 	ctx context.Context
@@ -118,8 +125,7 @@ func (d *DB) Close() error {
 	d.once.Do(func() { close(d.done) })
 	// Close the readers first, then checkpoint and truncate the write-ahead log,
 	// then close the writer last. SQLite removes -wal/-shm when the final
-	// connection closes, so this leaves a single .db file behind: "your data is
-	// one file" is then true on disk, not just in the schema.
+	// connection closes, so this leaves a single .db file behind.
 	errR := d.rdb.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	_, _ = d.wdb.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)")
@@ -138,13 +144,24 @@ func (d *DB) Migrate(ctx context.Context) error {
 	if v >= SchemaVersion {
 		return nil
 	}
-	body, err := schemaFS.ReadFile("schema.sql")
-	if err != nil {
-		return err
-	}
 	return d.Write(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, string(body)); err != nil {
-			return err
+		cur := v
+		if cur == 0 {
+			body, err := schemaFS.ReadFile("schema.sql")
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, string(body)); err != nil {
+				return err
+			}
+			cur = SchemaVersion
+		}
+		for ; cur < SchemaVersion; cur++ {
+			for _, stmt := range upgrades[cur] {
+				if _, err := tx.ExecContext(ctx, stmt); err != nil {
+					return err
+				}
+			}
 		}
 		_, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", SchemaVersion))
 		return err

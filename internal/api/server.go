@@ -53,6 +53,7 @@ func (s *Server) Router() http.Handler {
 		r.Get("/api/conversations", s.handleConversations)
 		r.Get("/api/conversations/{id}/messages", s.handleMessages)
 		r.Post("/api/conversations/{id}/send", s.handleSend)
+		r.Post("/api/conversations/{id}/recall", s.handleRecall)
 		r.Get("/api/stats", s.handleStats)
 		r.Get("/ws", s.handleWS)
 
@@ -225,7 +226,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		out = append(out, map[string]any{
 			"conversation_id": m.ConversationID, "seq": m.Seq, "id": m.ID,
 			"client_msg_id": m.ClientMsgID, "sender_id": m.SenderID,
-			"kind": m.Kind, "body": m.Body, "created_at": m.CreatedAt,
+			"kind": m.Kind, "body": m.Body, "recall_of": m.RecallOf, "created_at": m.CreatedAt,
 		})
 	}
 	writeJSON(w, 200, map[string]any{"messages": out})

@@ -25,6 +25,12 @@ const statusText = computed(() =>
   status.value === 'online' ? '已连接' : status.value === 'connecting' ? '连接中' : '已断开',
 )
 
+// A recall is itself a message: the tombstone points at the sequence it voids,
+// so rendering only has to translate "there is a tombstone for seq N".
+const recalledSeqs = computed(
+  () => new Set(messages.value.filter((m) => m.kind === 'recall' && (m.recall_of ?? 0) > 0).map((m) => m.recall_of as number)),
+)
+
 function merge(list: Message[]) {
   const seen = new Set<string>()
   const merged = [...messages.value]
@@ -182,6 +188,15 @@ function openAdmin() {
   location.hash = '#/admin'
 }
 
+async function recallMessage(m: Message) {
+  if (m.seq <= 0) return
+  try {
+    await api.recall(m.conversation_id, m.seq)
+  } catch (e) {
+    gapNotice.value = '撤回失败：' + (e as Error).message
+  }
+}
+
 async function logout() {
   manualDown = true
   ws?.close()
@@ -245,12 +260,22 @@ watch(activeId, () => (gapNotice.value = ''))
       </header>
 
       <div ref="scroller" class="stream">
-        <div v-for="m in messages" :key="m.conversation_id + ':' + m.seq" class="row" :class="{ mine: m.sender_id === me.id }">
-          <div class="bubble" :class="{ pending: m.seq < 0 }">
-            <div class="body">{{ m.body }}</div>
-            <div class="meta">#{{ m.seq }}</div>
+        <template v-for="m in messages" :key="m.conversation_id + ':' + m.seq">
+          <div v-if="m.kind === 'recall'" class="sys">撤回了一条消息</div>
+          <div v-else class="row" :class="{ mine: m.sender_id === me.id }">
+            <div class="bubble" :class="{ pending: m.seq < 0, revoked: recalledSeqs.has(m.seq) }">
+              <div class="body">{{ recalledSeqs.has(m.seq) ? '该消息已撤回' : m.body }}</div>
+              <div class="meta">
+                <span
+                  v-if="m.sender_id === me.id && m.seq > 0 && !recalledSeqs.has(m.seq)"
+                  class="act"
+                  @click="recallMessage(m)"
+                >撤回</span>
+                #{{ m.seq }}
+              </div>
+            </div>
           </div>
-        </div>
+        </template>
         <p v-if="!messages.length" class="empty">还没有消息。</p>
       </div>
 
@@ -315,6 +340,10 @@ watch(activeId, () => (gapNotice.value = ''))
 }
 .row.mine .bubble { background: var(--accent); border-color: var(--accent); color: #fff; }
 .bubble.pending { opacity: .55; }
+.bubble.revoked { opacity: .5; font-style: italic; }
+.sys { text-align: center; color: var(--muted); font-size: 12px; padding: 2px 0; }
+.act { cursor: pointer; margin-right: 8px; text-decoration: underline; opacity: .75; }
+.act:hover { opacity: 1; }
 .bubble .body { white-space: pre-wrap; word-break: break-word; }
 .bubble .meta { font-size: 10px; opacity: .6; margin-top: 3px; text-align: right; font-variant-numeric: tabular-nums; }
 

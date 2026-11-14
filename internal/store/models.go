@@ -27,5 +27,6 @@ type Message struct {
 	Kind           string
 	Body           string
 	Meta           string
+	RecallOf       int64
 	CreatedAt      int64
 }

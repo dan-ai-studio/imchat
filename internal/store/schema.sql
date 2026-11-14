@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS messages (
   kind            TEXT    NOT NULL DEFAULT 'text',
   body            TEXT    NOT NULL DEFAULT '',
   meta            TEXT    NOT NULL DEFAULT '{}',
+  recall_of       INTEGER NOT NULL DEFAULT 0,
   created_at      INTEGER NOT NULL,
   PRIMARY KEY (conversation_id, seq)
 );

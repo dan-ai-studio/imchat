@@ -14,12 +14,13 @@ type DueEntry struct {
 	SenderID       int64
 	Kind           string
 	Body           string
+	RecallOf       int64
 	CreatedAt      int64
 }
 
 func (d *DB) DueOutbox(ctx context.Context, now int64, limit int) ([]*DueEntry, error) {
 	rows, err := d.rdb.QueryContext(ctx,
-		"SELECT o.id, o.conversation_id, o.seq, o.recipient_id, o.message_id, m.sender_id, m.kind, m.body, m.created_at FROM outbox o JOIN messages m ON m.conversation_id = o.conversation_id AND m.seq = o.seq WHERE o.state = 'pending' AND o.next_at <= ? ORDER BY o.id LIMIT ?",
+		"SELECT o.id, o.conversation_id, o.seq, o.recipient_id, o.message_id, m.sender_id, m.kind, m.body, m.recall_of, m.created_at FROM outbox o JOIN messages m ON m.conversation_id = o.conversation_id AND m.seq = o.seq WHERE o.state = 'pending' AND o.next_at <= ? ORDER BY o.id LIMIT ?",
 		now, limit)
 	if err != nil {
 		return nil, err
@@ -29,7 +30,7 @@ func (d *DB) DueOutbox(ctx context.Context, now int64, limit int) ([]*DueEntry, 
 	for rows.Next() {
 		e := &DueEntry{}
 		if err := rows.Scan(&e.OutboxID, &e.ConversationID, &e.Seq, &e.RecipientID,
-			&e.MessageID, &e.SenderID, &e.Kind, &e.Body, &e.CreatedAt); err != nil {
+			&e.MessageID, &e.SenderID, &e.Kind, &e.Body, &e.RecallOf, &e.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, e)
