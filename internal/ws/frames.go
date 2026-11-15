@@ -49,9 +49,9 @@ type Frame struct {
 //
 // 协议里没有「撤回帧」：撤回是一条 kind=recall 的普通消息，见 ADR-0005。
 //
-// 一处与文档不符，以代码为准：README 与 ADR-0004 都提到一个 hello 帧，
-// 说它携带 last_seq 用来回补缺口。代码里没有这个帧——缺口补齐是客户端
-// 连上之后自己调历史接口完成的（README 的「已知限制」里也这么写）。
+// 这份清单是照代码核实出来的，不是照文档抄的。协议里既没有 hello 帧，也没有
+// presence 帧——README 与两份 ADR 曾写过它们，已按代码改回来。缺口补齐也不走
+// 帧：客户端连上之后自己调一次历史接口。
 
 // Encode marshals a frame. A marshal failure yields an empty object rather than
 // a hand-written fallback string, which keeps the wire contract JSON-only.

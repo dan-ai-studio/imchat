@@ -22,7 +22,7 @@ sudo ./imchat -domain im.example.com           # 公网：自己向 Let's Encryp
 | 不丢 | 消息与待投递记录同事务提交；只有客户端 ack 才消解；未 ack 的超时重投 | `outbox` 表 + `RepumpStale` |
 | 不重 | 客户端生成 `client_msg_id`，服务端唯一索引兜底，重发返回既有消息 | `idx_messages_client` |
 | 不乱序 | 会话序号由服务端在写事务内分配，客户端不得自造 | `UPDATE ... RETURNING next_seq` |
-| 能补齐 | `hello` 帧携带 `last_seq`，服务端回补缺口 | `/messages?after=N` |
+| 能补齐 | 重连后客户端用自己见过的最大序号拉缺口，服务端只回比它大的 | `/messages?after=N` |
 
 **不做恰好一次。** 跨进程不存在恰好一次；这里"看起来像恰好一次"，是幂等写入 + 客户端按
 `(conversation_id, seq)` 去重 + 序号单调三者叠加出的假象。
@@ -80,7 +80,7 @@ go build -o bin/imchat.exe ./cmd/imchat
 - **消息**：文本、图片（二进制落盘，消息表只存文件名）、撤回
 - **@提醒**：服务端解析 `@username` 写入消息的 `meta.mentions`，前端高亮
 - **已读位点**：按设备记录，用户级取各端最大值
-- **断线补齐**：重连时按 `last_seq` 拉缺口，界面提示补了多少条
+- **断线补齐**：重连后拿自己见过的最大序号拉缺口，界面提示补了多少条
 - **全文搜索**：FTS5 索引，中英文都能命中
 - **管理台**：用户、会话、消息检索、投递队列、封禁与踢下线
 
@@ -102,8 +102,11 @@ go build -o bin/imchat.exe ./cmd/imchat
 
 ## 协议
 
-客户端 → 服务端：`hello` / `send` / `ack` / `read` / `ping`
-服务端 → 客户端：`ready` / `msg` / `sent` / `pong` / `error`
+客户端 → 服务端：`send` / `ack` / `read` / `ping`
+服务端 → 客户端：`ready` / `msg` / `sent` / `pong` / `read` / `error`
+
+没有专门的握手帧：连上后服务端主动发 `ready`，身份由会话 cookie 决定。
+缺口补齐也不走帧，由客户端调历史接口完成——见下方「已知限制」。
 
 ```jsonc
 // 客户端发送（kind 为 text 或 image；图片消息的 body 是上传返回的文件名）
@@ -202,6 +205,6 @@ GLOSSARY.md          领域词汇表（先读这个）
 ## 已知限制
 
 - 单写者决定了写并发上限；这是刻意的取舍，不是待修的问题
-- `hello` 帧目前只用于握手，缺口补齐由客户端在 `open` 时主动调用 HTTP 接口完成
+- 缺口补齐不走帧：客户端重连后调一次 `/messages?after=N`，把缺的那段拉回来，再按序号去重
 - FTS5 使用 unicode61 分词，中文按字切分，长句检索精度不如专门的 CJK 分词器
 - 单机部署，没有多实例与横向扩展的运行时证据（只有设计论述）

@@ -11,7 +11,8 @@
 ## 决策
 
 1. 服务端使用 `coder/websocket`（原 `nhooyr.io/websocket`），不引入 Socket.IO 服务端。
-2. 应用层自定义 JSON 帧，共六类：`hello` / `send` / `ack` / `read` / `presence` / `ping`。
+2. 应用层自定义 JSON 帧，上下行各一套：上行 `send` / `ack` / `read` / `ping`，
+   下行 `ready` / `msg` / `sent` / `pong` / `read` / `error`。没有握手帧，身份由会话 cookie 决定。
 3. 前端使用浏览器原生 `WebSocket`，不引入 `socket.io-client`。
 4. 连接层只负责收发帧与心跳，不承载业务语义；业务语义全部落在 service 层。
 
