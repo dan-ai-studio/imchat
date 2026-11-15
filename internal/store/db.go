@@ -13,7 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const SchemaVersion = 4
+const SchemaVersion = 5
 
 //go:embed schema.sql
 var schemaFS embed.FS
@@ -35,6 +35,12 @@ var upgrades = map[int][]string{
 		"CREATE INDEX IF NOT EXISTS idx_community_members_user ON community_members(user_id)",
 		"ALTER TABLE conversations ADD COLUMN community_id INTEGER NOT NULL DEFAULT 1",
 		"CREATE INDEX IF NOT EXISTS idx_conversations_community ON conversations(community_id, id)",
+	},
+	// 4 → 5：加入社群的两条路——一次性邀请码，或提交申请由管理员审批。
+	4: {
+		"CREATE TABLE IF NOT EXISTS community_invites (code TEXT PRIMARY KEY, community_id INTEGER NOT NULL REFERENCES communities(id) ON DELETE CASCADE, created_by INTEGER NOT NULL REFERENCES users(id), created_at INTEGER NOT NULL, used_by INTEGER NOT NULL DEFAULT 0, used_at INTEGER NOT NULL DEFAULT 0)",
+		"CREATE TABLE IF NOT EXISTS community_join_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, community_id INTEGER NOT NULL REFERENCES communities(id) ON DELETE CASCADE, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')), created_at INTEGER NOT NULL, decided_at INTEGER NOT NULL DEFAULT 0, decided_by INTEGER NOT NULL DEFAULT 0)",
+		"CREATE UNIQUE INDEX IF NOT EXISTS idx_join_pending ON community_join_requests(community_id, user_id) WHERE status = 'pending'",
 	},
 }
 

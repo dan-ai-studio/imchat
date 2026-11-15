@@ -71,7 +71,7 @@ func (s *Server) handleCreateCommunity(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "create_failed", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusCreated, c)
+	writeJSON(w, http.StatusCreated, map[string]any{"id": c.ID, "name": c.Name, "description": c.Description, "role": c.Role})
 }
 
 // handleCommunities lists the communities the caller belongs to.
@@ -82,7 +82,12 @@ func (s *Server) handleCommunities(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "list_failed", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"communities": list})
+	// 字段名就是线上契约：这里用小写下划线，和其余接口保持一致。
+	out := make([]map[string]any, 0, len(list))
+	for _, c := range list {
+		out = append(out, map[string]any{"id": c.ID, "name": c.Name, "description": c.Description, "role": c.Role})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"communities": out})
 }
 
 // handleCommunityConversations lists one user's conversations inside one
@@ -105,7 +110,12 @@ func (s *Server) handleCommunityConversations(w http.ResponseWriter, r *http.Req
 		writeErr(w, http.StatusInternalServerError, "list_failed", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"conversations": list})
+	// 与 /api/conversations 同形：前端只认这几个键。
+	out := make([]map[string]any, 0, len(list))
+	for _, c := range list {
+		out = append(out, map[string]any{"id": c.ID, "kind": c.Kind, "title": c.Title, "next_seq": c.NextSeq})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"conversations": out})
 }
 
 // handleCreateCommunityConversation creates a group conversation inside one

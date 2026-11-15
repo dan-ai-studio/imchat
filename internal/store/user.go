@@ -35,14 +35,6 @@ func (d *DB) CreateUser(ctx context.Context, username, displayName, passwordHash
 			return err
 		}
 		u.ID, err = res.LastInsertId()
-		if err != nil {
-			return err
-		}
-		// 新账号默认进默认社群：一个人至少要有一个可去的社群，
-		// 否则登录后是一片空白。
-		_, err = tx.ExecContext(ctx,
-			"INSERT OR IGNORE INTO community_members (community_id, user_id, role, joined_at) VALUES (?, ?, 'member', ?)",
-			DefaultCommunityID, u.ID, u.CreatedAt)
 		return err
 	})
 	// 事务错误直接上抛：这一层不重试，也不把错误翻译成别的形状。

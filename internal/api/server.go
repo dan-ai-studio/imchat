@@ -78,6 +78,12 @@ func (s *Server) Router() http.Handler {
 		// 而不是从客户端传来的任何 id 出发。
 		r.Post("/api/communities", s.handleCreateCommunity)
 		r.Get("/api/communities", s.handleCommunities)
+		// 加入社群的两条路：一次性邀请码，或提交申请等管理员审批。
+		r.Post("/api/communities/{id}/invites", s.handleCreateInvite)
+		r.Post("/api/join/{code}", s.handleJoinByInvite)
+		r.Post("/api/communities/{id}/requests", s.handleRequestJoin)
+		r.Get("/api/communities/{id}/requests", s.handleJoinRequests)
+		r.Post("/api/communities/{id}/requests/{rid}", s.handleDecideJoinRequest)
 		r.Get("/api/communities/{id}/conversations", s.handleCommunityConversations)
 		r.Post("/api/communities/{id}/conversations", s.handleCreateCommunityConversation)
 		r.Get("/api/conversations", s.handleConversations)

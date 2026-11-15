@@ -108,6 +108,19 @@ export const api = {
       '/api/communities/' + communityId + '/conversations',
       json({ kind: 'group', title, members }),
     ),
+  // 加入社群的两条路：邀请码直接加入；没有码就提交申请，等管理员审批。
+  createInvite: (communityId: number) =>
+    req<{ code: string; community_id: number }>('/api/communities/' + communityId + '/invites', { method: 'POST' }),
+  joinByInvite: (code: string) =>
+    req<{ community_id: number }>('/api/join/' + encodeURIComponent(code), { method: 'POST' }),
+  requestJoin: (communityId: number) =>
+    req<{ status: string }>('/api/communities/' + communityId + '/requests', { method: 'POST' }),
+  joinRequests: (communityId: number) =>
+    req<{ requests: Array<{ id: number; user_id: number; username: string; display_name: string; created_at: number }> }>(
+      '/api/communities/' + communityId + '/requests',
+    ),
+  decideJoin: (communityId: number, rid: number, approve: boolean) =>
+    req<{ ok: boolean }>('/api/communities/' + communityId + '/requests/' + rid, json({ approve })),
   // 会话与消息：列表、历史、发送。历史接口的 after 参数就是断线补齐的入口。
   conversations: () => req<{ conversations: Conversation[] }>('/api/conversations'),
   messages: (id: number, after = 0) =>

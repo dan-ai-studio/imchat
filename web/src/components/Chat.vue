@@ -24,6 +24,11 @@ const scroller = ref<HTMLElement | null>(null)
 const members = ref<Array<{ user_id: number; username: string; display_name: string; role: string; muted: boolean }>>([])
 const showMembers = ref(false)
 const showCreate = ref(false)
+// 加入社群与审批：邀请码是加入凭证，审批列表只对社群管理员开放。
+const showJoin = ref(false)
+const joinCode = ref('')
+const showRequests = ref(false)
+const joinRequests = ref<Array<{ id: number; user_id: number; username: string; display_name: string }>>([])
 // 建群用的标题输入，与消息草稿分开：它们是两件不同的事。
 const newTitle = ref('')
 const people = ref<Array<{ id: number; username: string; display_name: string }>>([])
@@ -377,6 +382,54 @@ async function onCommunityChange() {
   if (conversations.value.length) await select(conversations.value[0].id)
 }
 
+// 当前社群里「我」是不是管理员：决定邀请与审批按钮出不出现。
+const isCommunityAdmin = computed(() => {
+  const c = communities.value.find((x) => x.id === activeCommunity.value)
+  return c?.role === 'owner' || c?.role === 'admin'
+})
+
+// 生成一张一次性邀请码：码只显示一次，复制出去就是加入凭证。
+async function createInvite() {
+  try {
+    const res = await api.createInvite(activeCommunity.value)
+    gapNotice.value = '邀请码：' + res.code + '（一次性，复制发给对方）'
+  } catch (e) {
+    gapNotice.value = '生成邀请码失败：' + (e as Error).message
+  }
+}
+
+// 凭码加入：成功后重拉社群列表，并切到刚加入的那个。
+async function joinCommunity() {
+  const code = joinCode.value.trim()
+  if (!code) return
+  try {
+    const res = await api.joinByInvite(code)
+    communities.value = (await api.communities()).communities
+    showJoin.value = false
+    joinCode.value = ''
+    activeCommunity.value = res.community_id
+    await onCommunityChange()
+  } catch (e) {
+    gapNotice.value = '加入失败：' + (e as Error).message
+  }
+}
+
+// 拉待审批列表：只有社群管理员能拿到。
+async function loadJoinRequests() {
+  try {
+    joinRequests.value = (await api.joinRequests(activeCommunity.value)).requests
+    showRequests.value = true
+  } catch (e) {
+    gapNotice.value = (e as Error).message
+  }
+}
+
+// 批准或拒绝一条申请；批准后对方立刻成为成员。
+async function decideJoin(rid: number, approve: boolean) {
+  await api.decideJoin(activeCommunity.value, rid, approve)
+  await loadJoinRequests()
+}
+
 // 建群：没填标题就给个默认的，然后把人一次加进去。
 async function createGroup() {
   const title = newTitle.value.trim() || '新群聊'
@@ -491,6 +544,8 @@ watch(activeId, () => (gapNotice.value = ''))
           <span class="meta">{{ c.next_seq }}</span>
         </button>
         <button class="newgroup" @click="openCreate">+ 新建群聊</button>
+        <!-- 没有码的人走「加入」弹窗；有码的人一步进群。 -->
+        <button class="newgroup" @click="showJoin = true">+ 加入社群</button>
       </div>
 
       <!-- 底部状态条：连接状态与待投递队列深度。 -->
@@ -502,6 +557,9 @@ watch(activeId, () => (gapNotice.value = ''))
         </div>
         <!-- 三个按钮：模拟断网（演示补齐）、管理台（仅管理员）、退出。 -->
         <button class="ghost" @click="simulateDrop">模拟断网</button>
+        <!-- 社群管理员才看得到：邀请码与待审批。 -->
+        <button v-if="isCommunityAdmin" class="ghost" @click="createInvite">邀请</button>
+        <button v-if="isCommunityAdmin" class="ghost" @click="loadJoinRequests">待审批</button>
         <button v-if="me.is_admin" class="ghost" @click="openAdmin">管理台</button>
         <button class="ghost" @click="logout">退出</button>
       </div>
@@ -615,6 +673,37 @@ watch(activeId, () => (gapNotice.value = ''))
           <button class="ghost" @click="showCreate = false">取消</button>
           <!-- 创建：走 /api/conversations，成功后关弹窗并切到新群。 -->
           <button class="primary" @click="createGroup">创建</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 加入社群弹窗：粘贴邀请码即可，码是一次性的。 -->
+    <div v-if="showJoin" class="modal">
+      <div class="sheet">
+        <h3>加入社群</h3>
+        <input v-model="joinCode" placeholder="粘贴邀请码" />
+        <div class="row-actions">
+          <button class="ghost" @click="showJoin = false">取消</button>
+          <button class="primary" @click="joinCommunity">加入</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 审批弹窗：批准会同时把人加进社群，拒绝只改状态。 -->
+    <div v-if="showRequests" class="modal">
+      <div class="sheet">
+        <h3>待审批（{{ joinRequests.length }}）</h3>
+        <ul class="picks">
+          <li v-for="r in joinRequests" :key="r.id">
+            <span>{{ r.display_name }} <span class="muted">@{{ r.username }}</span></span>
+            <span class="mops">
+              <button class="tiny" @click="decideJoin(r.id, true)">批准</button>
+              <button class="tiny" @click="decideJoin(r.id, false)">拒绝</button>
+            </span>
+          </li>
+        </ul>
+        <div class="row-actions">
+          <button class="ghost" @click="showRequests = false">关闭</button>
         </div>
       </div>
     </div>

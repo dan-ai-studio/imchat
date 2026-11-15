@@ -54,6 +54,30 @@ CREATE TABLE IF NOT EXISTS community_members (
 );
 CREATE INDEX IF NOT EXISTS idx_community_members_user ON community_members(user_id);
 
+-- 邀请码：凭码直接加入社群。码一次性，用过即废——所以它没有「剩余次数」，
+-- 只有一个 used_by；这样「码被谁用了」也能回答。
+CREATE TABLE IF NOT EXISTS community_invites (
+  code         TEXT    PRIMARY KEY,
+  community_id INTEGER NOT NULL REFERENCES communities(id) ON DELETE CASCADE,
+  created_by   INTEGER NOT NULL REFERENCES users(id),
+  created_at   INTEGER NOT NULL,
+  used_by      INTEGER NOT NULL DEFAULT 0,
+  used_at      INTEGER NOT NULL DEFAULT 0
+);
+
+-- 加入申请：没有邀请码的人提交申请，由社群管理员审批。
+-- 部分唯一索引保证同一个人对同一个社群只有一条待审记录。
+CREATE TABLE IF NOT EXISTS community_join_requests (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  community_id INTEGER NOT NULL REFERENCES communities(id) ON DELETE CASCADE,
+  user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status       TEXT    NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
+  created_at   INTEGER NOT NULL,
+  decided_at   INTEGER NOT NULL DEFAULT 0,
+  decided_by   INTEGER NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_join_pending ON community_join_requests(community_id, user_id) WHERE status = 'pending';
+
 -- 会话本身。next_seq 是序号水位：取号就是
 -- UPDATE next_seq = next_seq + 1 ... RETURNING，且与消息行同事务。
 CREATE TABLE IF NOT EXISTS conversations (

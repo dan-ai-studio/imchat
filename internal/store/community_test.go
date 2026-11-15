@@ -27,13 +27,13 @@ func TestCreateCommunityMakesOwner(t *testing.T) {
 	if role != "owner" {
 		t.Fatalf("role: got %q, want owner", role)
 	}
-	// 新账号默认在默认社群里，所以列表是「默认 + 新建」两条。
+	// 注册不再自动分配社群：列表里只有刚建的那一个。
 	list, err := db.CommunitiesOf(ctx, u.ID)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(list) != 2 {
-		t.Fatalf("communities: got %d, want 2", len(list))
+	if len(list) != 1 {
+		t.Fatalf("communities: got %d, want 1", len(list))
 	}
 }
 

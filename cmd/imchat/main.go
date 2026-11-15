@@ -382,6 +382,17 @@ func seedDemo(ctx context.Context, am *auth.Manager, db *store.DB) {
 		log.Printf("seed bob: %v", err)
 		return
 	}
+	// 演示账号要显式进默认社群：注册本身不再自动分配社群。
+	// alice 在默认社群里是管理员，这样演示才能走「发邀请码 / 审批」两条路。
+	for _, u := range []*store.User{alice, bob} {
+		role := "member"
+		if u.ID == alice.ID {
+			role = "admin"
+		}
+		if err := db.AddCommunityMember(ctx, store.DefaultCommunityID, u.ID, role); err != nil {
+			log.Printf("seed community member %d: %v", u.ID, err)
+		}
+	}
 	// 建一个两人直聊，再把双方都以正确的会话内角色加进去。
 	c, err := db.CreateConversation(ctx, "dm", "", alice.ID)
 	if err != nil {
