@@ -2,7 +2,7 @@ APP := imchat
 BIN := bin/imchat.exe
 LDFLAGS := -s -w
 
-.PHONY: build run release tidy lint test verify e2e load clean
+.PHONY: build run release tidy lint test verify notes-check e2e load clean
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/imchat
@@ -26,6 +26,9 @@ test:
 
 verify:
 	go test ./internal/... -v
+
+notes-check:
+	go run ./cmd/notescheck .
 
 e2e: build
 	@echo "start the server first: ./$(BIN) -addr 127.0.0.1:18081 -db ./data/e2e.db"

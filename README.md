@@ -160,6 +160,8 @@ go build -o bin/loadtest.exe ./cmd/loadtest
 这组数字不是"我们很快"的声明，而是"并发压上去，序号仍然稠密"的证据。
 单写者在这里不是瓶颈的辩解，而是这个性质的来源。
 
+想按顺序读代码，从 [docs/READING.md](docs/READING.md) 开始——那是阅读总图，这里只是清单。
+
 ## 目录
 
 ```
