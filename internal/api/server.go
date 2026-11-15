@@ -88,6 +88,14 @@ func (s *Server) Router() http.Handler {
 		r.Delete("/api/communities/{id}/members/{uid}", s.handleRemoveCommunityMember)
 		r.Get("/api/communities/{id}/audit", s.handleAudit)
 		r.Post("/api/communities/{id}/requests/{rid}", s.handleDecideJoinRequest)
+		// 房间：以在场为核心的会话。列表与建房门都从社群出发。
+		r.Post("/api/communities/{id}/rooms", s.handleCreateRoom)
+		r.Get("/api/communities/{id}/rooms", s.handleRooms)
+		r.Post("/api/rooms/{id}/enter", s.handleEnterRoom)
+		r.Post("/api/rooms/{id}/leave", s.handleLeaveRoom)
+		// 关房是房主动作；进入与退房只要求是社群成员。
+		r.Post("/api/rooms/{id}/close", s.handleCloseRoom)
+		r.Get("/api/rooms/{id}/occupants", s.handleRoomOccupants)
 		r.Get("/api/communities/{id}/conversations", s.handleCommunityConversations)
 		r.Post("/api/communities/{id}/conversations", s.handleCreateCommunityConversation)
 		r.Get("/api/conversations", s.handleConversations)
@@ -334,6 +342,7 @@ func (s *Server) SendMessage(ctx context.Context, userID, convID int64, clientMs
 	// 这里是全仓唯一写消息的地方。在别处再开一条写消息的路，会同时破坏三件事：
 	// 取号与待投递记录的同事务（序号可能因此出现空洞）、client_msg_id 的幂等去重、
 	// 以及 @ 提醒的解析。三件事都长在这一条函数里，绕开它等于绕开全部。
+	// 没给类型就按文本处理；空文本消息在这里被拒，不落到写路径。
 	if kind == "" {
 		kind = "text"
 	}
@@ -343,6 +352,11 @@ func (s *Server) SendMessage(ctx context.Context, userID, convID int64, clientMs
 	// 禁言是会话内的权力，不是平台级的：这里查的是会话内角色与到期时间。
 	if until, err := s.DB.MutedUntil(ctx, convID, userID); err == nil && until > time.Now().UnixMilli() {
 		return nil, errors.New("you are muted in this conversation")
+	}
+	// 房间与会话共用这一条写路径，但投递承诺不同：房间是广播，不落逐接收者义务。
+	conv, err := s.DB.ConversationByID(ctx, convID)
+	if err != nil {
+		return nil, err
 	}
 	members, err := s.DB.Members(ctx, convID)
 	if err != nil {
@@ -373,15 +387,42 @@ func (s *Server) SendMessage(ctx context.Context, userID, convID int64, clientMs
 	}
 
 	// 真正落库的是 store 层：取号、消息行、待投递记录在同一个事务里完成。
-	return s.DB.SendMessage(ctx, store.SendParams{
+	msg, err := s.DB.SendMessage(ctx, store.SendParams{
 		ConversationID: convID,
 		SenderID:       userID,
 		ClientMsgID:    clientMsgID,
+		// IsRoom 决定 store 层写不写待投递记录：房间不写。
 		Kind:           kind,
 		Body:           body,
 		Meta:           meta,
 		Recipients:     members,
+		IsRoom:         conv.IsRoom,
 	})
+	if err != nil {
+		return nil, err
+	}
+	// 房间消息不经过投递器：写成功后直接推给此刻在场的人。
+	if conv.IsRoom {
+		s.broadcastToRoom(ctx, convID, msg)
+	}
+	return msg, nil
+}
+
+// broadcastToRoom pushes one room message to everyone currently present. It goes
+// straight onto the bus because a room promises "whoever is here now", not
+// per-recipient delivery; nobody present means nobody to push to.
+func (s *Server) broadcastToRoom(ctx context.Context, roomID int64, m *store.Message) {
+	if s.Bus == nil {
+		return
+	}
+	occupants, err := s.DB.RoomOccupants(ctx, roomID)
+	if err != nil {
+		return
+	}
+	payload := store.MessageFrameJSON(m)
+	for _, uid := range occupants {
+		_ = s.Bus.Publish(fmt.Sprintf("user.%d", uid), payload)
+	}
 }
 
 // handleSend is the HTTP twin of the websocket send frame. Both funnel into

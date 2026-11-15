@@ -97,6 +97,10 @@ CREATE TABLE IF NOT EXISTS conversations (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   community_id INTEGER NOT NULL DEFAULT 1 REFERENCES communities(id),
   kind         TEXT    NOT NULL CHECK (kind IN ('dm','group')),
+  -- 房间是「以在场为核心」的会话：复用消息与序号，但投递是广播、不是逐人送达。
+  is_room      INTEGER NOT NULL DEFAULT 0,
+  -- 房间关闭时间：0 表示还开着。关闭不删消息，只是不再出现在房间里。
+  closed_at    INTEGER NOT NULL DEFAULT 0,
   title      TEXT    NOT NULL DEFAULT '',
   owner_id   INTEGER NOT NULL DEFAULT 0,
   next_seq   INTEGER NOT NULL DEFAULT 0,
@@ -132,6 +136,8 @@ CREATE TABLE IF NOT EXISTS messages (
   body            TEXT    NOT NULL DEFAULT '',
   meta            TEXT    NOT NULL DEFAULT '{}',
   recall_of       INTEGER NOT NULL DEFAULT 0,
+  -- 投递语义写在消息行上：会话是 at_least_once，房间是 broadcast。
+  delivery        TEXT    NOT NULL DEFAULT 'at_least_once',
   created_at      INTEGER NOT NULL,
   PRIMARY KEY (conversation_id, seq)
 );
@@ -148,6 +154,15 @@ CREATE TABLE IF NOT EXISTS read_cursors (
   seq             INTEGER NOT NULL DEFAULT 0,
   updated_at      INTEGER NOT NULL,
   PRIMARY KEY (conversation_id, user_id, device_id)
+);
+
+-- 房间在场：进房写一行、退房删一行。在线态是瞬时事实，不进历史。
+CREATE TABLE IF NOT EXISTS room_presence (
+  conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  joined_at       INTEGER NOT NULL,
+  last_seen_at    INTEGER NOT NULL,
+  PRIMARY KEY (conversation_id, user_id)
 );
 
 -- 一条「消息 × 接收者」的待投递记录。这就是「不丢」的载体：

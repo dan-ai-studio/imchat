@@ -38,6 +38,9 @@ type SendParams struct {
 	Body           string
 	Meta           string
 	Recipients     []int64
+	// IsRoom marks a broadcast write: the message is stored once and pushed to
+	// whoever is present, so no per-recipient obligation is created.
+	IsRoom bool
 }
 
 // appendInTx is the single place a message row and its delivery obligations are
@@ -71,10 +74,17 @@ func (d *DB) appendInTx(ctx context.Context, tx *sql.Tx, p SendParams, kind, bod
 	msg.Seq = seq
 	msg.ID = NewID()
 
+	// 投递语义写在消息行上：房间是广播，其余是至少一次。
+	// 默认是至少一次；房间把它翻成广播，消息行因此自带语义。
+	msg.Delivery = "at_least_once"
+	if p.IsRoom {
+		msg.Delivery = "broadcast"
+	}
+	// 消息行把投递语义一起写下来：读历史的人不必回头再查会话是不是房间。
 	if _, err := tx.ExecContext(ctx,
-		"INSERT INTO messages (conversation_id, seq, id, client_msg_id, sender_id, kind, body, meta, recall_of, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		"INSERT INTO messages (conversation_id, seq, id, client_msg_id, sender_id, kind, body, meta, recall_of, delivery, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		msg.ConversationID, msg.Seq, msg.ID, nullString(msg.ClientMsgID),
-		msg.SenderID, msg.Kind, msg.Body, msg.Meta, msg.RecallOf, msg.CreatedAt); err != nil {
+		msg.SenderID, msg.Kind, msg.Body, msg.Meta, msg.RecallOf, msg.Delivery, msg.CreatedAt); err != nil {
 		return nil, err
 	}
 
@@ -88,9 +98,13 @@ func (d *DB) appendInTx(ctx context.Context, tx *sql.Tx, p SendParams, kind, bod
 		}
 	}
 
-	// 每个接收者一条待投递记录。它们与消息行同事务写入，所以不存在
-	// 「消息在、义务没了」或「义务在、消息没了」这两种半截状态。
+	// 房间不写待投递记录：广播的承诺是「发给此刻在场的人」，没有逐接收者的义务。
+	// 会话仍然逐接收者落一行，这是「至少一次」的物理载体。
 	now := time.Now().UnixMilli()
+	if p.IsRoom {
+		return msg, nil
+	}
+	// 逐个接收者落一行：ack 消解的就是这些行。
 	for _, r := range p.Recipients {
 		if _, err := tx.ExecContext(ctx,
 			"INSERT INTO outbox (message_id, conversation_id, seq, recipient_id, state, next_at, created_at) VALUES (?, ?, ?, ?, 'pending', ?, ?)",

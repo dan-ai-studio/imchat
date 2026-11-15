@@ -6,6 +6,36 @@ package store
 
 import "encoding/json"
 
+// MessageFrameJSON encodes one freshly written message in the same shape the
+// dispatcher uses, so a room broadcast and an outbox delivery look identical to
+// the client. Delivery is included on purpose: a client can tell a broadcast
+// from an acknowledged delivery without guessing.
+func MessageFrameJSON(m *Message) []byte {
+	// 字段与投递器那一路完全一致，客户端不需要两套解析。
+	payload := map[string]any{
+		"type":            "msg",
+		"conversation_id": m.ConversationID,
+		// seq 与 id 是客户端去重与定位的唯一依据。
+		"seq":             m.Seq,
+		"id":              m.ID,
+		"sender_id":       m.SenderID,
+		"kind":            m.Kind,
+		"body":            m.Body,
+		"meta":            m.Meta,
+		"delivery":        m.Delivery,
+		"created_at":      m.CreatedAt,
+	}
+	// 只有墓碑才带 recall_of：普通消息不上线这个字段，省得客户端到处判空。
+	if m.RecallOf > 0 {
+		payload["recall_of"] = m.RecallOf
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return []byte("{}")
+	}
+	return b
+}
+
 // FrameJSON renders the wire frame for one due delivery.
 func FrameJSON(e *DueEntry) []byte {
 	// 字段顺序写死在这里，等于把线上格式钉在代码上：

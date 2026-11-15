@@ -12,19 +12,22 @@ type User struct {
 }
 
 // Conversation is a chat row. NextSeq is the sequence high-water mark the write
-// path increments; nothing else is allowed to touch it.
+// path increments; nothing else is allowed to touch it. IsRoom marks a room:
+// same storage and sequence, different delivery promise.
 type Conversation struct {
 	ID          int64
 	CommunityID int64
-	Kind      string
-	Title     string
-	OwnerID   int64
-	NextSeq   int64
-	CreatedAt int64
+	IsRoom      bool
+	Kind        string
+	Title       string
+	OwnerID     int64
+	NextSeq     int64
+	CreatedAt   int64
 }
 
 // Message is one immutable row of history. RecallOf points at the sequence this
-// row voids, and is zero for everything except tombstones.
+// row voids, and is zero for everything except tombstones. Delivery records the
+// promise this row was written under: at_least_once or broadcast.
 type Message struct {
 	ConversationID int64
 	Seq            int64
@@ -35,5 +38,6 @@ type Message struct {
 	Body           string
 	Meta           string
 	RecallOf       int64
+	Delivery       string
 	CreatedAt      int64
 }

@@ -13,7 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const SchemaVersion = 6
+const SchemaVersion = 7
 
 //go:embed schema.sql
 var schemaFS embed.FS
@@ -46,6 +46,13 @@ var upgrades = map[int][]string{
 	5: {
 		"CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, community_id INTEGER NOT NULL DEFAULT 0, actor_id INTEGER NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL DEFAULT '', detail TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL)",
 		"CREATE INDEX IF NOT EXISTS idx_audit_community ON audit_log(community_id, id)",
+	},
+	// 6 → 7：房间。复用会话与消息，但投递是广播；在场单独一张表。
+	6: {
+		"ALTER TABLE conversations ADD COLUMN is_room INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE messages ADD COLUMN delivery TEXT NOT NULL DEFAULT 'at_least_once'",
+		"CREATE TABLE IF NOT EXISTS room_presence (conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, joined_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, PRIMARY KEY (conversation_id, user_id))",
+		"ALTER TABLE conversations ADD COLUMN closed_at INTEGER NOT NULL DEFAULT 0",
 	},
 }
 
