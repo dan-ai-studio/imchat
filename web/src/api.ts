@@ -118,6 +118,12 @@ export const api = {
   enterRoom: (id: number) => req<{ id: number; online: number }>('/api/rooms/' + id + '/enter', { method: 'POST' }),
   leaveRoom: (id: number) => req<{ ok: boolean }>('/api/rooms/' + id + '/leave', { method: 'POST' }),
   closeRoom: (id: number) => req<{ ok: boolean }>('/api/rooms/' + id + '/close', { method: 'POST' }),
+  // 媒体信令：一次 offer/answer 建连；重协商的 answer 也走同一个形状。
+  rtcOffer: (roomId: number, sdp: string) =>
+    req<{ type: string; sdp: string }>('/api/rooms/' + roomId + '/rtc/offer', json({ sdp })),
+  rtcAnswer: (roomId: number, sdp: string) =>
+    req<{ ok: boolean }>('/api/rooms/' + roomId + '/rtc/answer', json({ sdp })),
+  rtcLeave: (roomId: number) => req<{ ok: boolean }>('/api/rooms/' + roomId + '/rtc/leave', { method: 'POST' }),
   // 加入社群的两条路：邀请码直接加入；没有码就提交申请，等管理员审批。
   createInvite: (communityId: number) =>
     req<{ code: string; community_id: number }>('/api/communities/' + communityId + '/invites', { method: 'POST' }),

@@ -20,6 +20,7 @@ import (
 	"imchat/internal/auth"
 	"imchat/internal/bus"
 	"imchat/internal/delivery"
+	"imchat/internal/media"
 	"imchat/internal/store"
 	"imchat/internal/ws"
 )
@@ -35,6 +36,9 @@ type Server struct {
 	// Bus carries ephemeral state (read cursors, presence) that must not be
 	// persisted: losing it is harmless, the next fetch restores it.
 	Bus *bus.Bus
+	// Media owns the room peer connections. Nil means "this instance has no
+	// media": the RTC endpoints then answer 503 instead of pretending.
+	Media *media.Manager
 }
 
 // ctxKey is a private type for request-context keys, so no other package can
@@ -95,6 +99,10 @@ func (s *Server) Router() http.Handler {
 		r.Post("/api/rooms/{id}/leave", s.handleLeaveRoom)
 		// 关房是房主动作；进入与退房只要求是社群成员。
 		r.Post("/api/rooms/{id}/close", s.handleCloseRoom)
+		// 媒体信令：一次 offer/answer 建连，之后服务端主动 offer 重协商。
+		r.Post("/api/rooms/{id}/rtc/offer", s.handleRTCOffer)
+		r.Post("/api/rooms/{id}/rtc/answer", s.handleRTCAnswer)
+		r.Post("/api/rooms/{id}/rtc/leave", s.handleRTCLeave)
 		r.Get("/api/rooms/{id}/occupants", s.handleRoomOccupants)
 		r.Get("/api/communities/{id}/conversations", s.handleCommunityConversations)
 		r.Post("/api/communities/{id}/conversations", s.handleCreateCommunityConversation)

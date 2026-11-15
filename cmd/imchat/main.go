@@ -134,7 +134,11 @@ func main() {
 
 	// 装配顺序是有依赖的：存储 → 总线 → 连接中心 → HTTP 层 → 投递器。
 	// 后面每一块都要拿前面几块，所以顺序不能调换。
+	// 媒体信令复用同一条总线：房间里的重协商帧和消息帧走同一套推送。
 	srvAPI := &api.Server{DB: db, Auth: am, Hub: hub, FilesDir: filesDir, Bus: b}
+	srvAPI.Media = api.NewMediaManager(func(userID int64, payload []byte) error {
+		return b.Publish(fmt.Sprintf("user.%d", userID), payload)
+	})
 	disp := delivery.New(db, b)
 	srvAPI.Dispatcher = disp
 	// 投递器在后台每 100 毫秒扫一次到期记录。它的命挂在 ctx 上，剪断就停。

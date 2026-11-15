@@ -130,6 +130,11 @@ function onFrame(raw: MessageEvent) {
     reads.value[f.user_id] = Math.max(reads.value[f.user_id] ?? 0, f.seq)
     return
   }
+  if (f.type === 'rtc') {
+    // 服务端重协商：加轨之后它主动 offer，我们答完再应用本地描述。
+    void answerRTC(f.signal)
+    return
+  }
   if (f.type !== 'msg') return
 
   if (f.conversation_id !== activeId.value) {
@@ -386,6 +391,41 @@ async function onCommunityChange() {
   if (conversations.value.length) await select(conversations.value[0].id)
 }
 
+// 房间语音：一条 PeerConnection 负责发布自己的麦克风并接收别人的音轨。
+let pc: RTCPeerConnection | null = null
+
+// 进房后建连：offer 由客户端发起，answer 里带着房间里已有的音轨。
+async function joinAudio(roomId: number) {
+  try {
+    // 浏览器要求麦克风必须由用户手势触发；进房按钮就是那个手势。
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    pc = new RTCPeerConnection()
+    for (const t of stream.getTracks()) pc.addTrack(t, stream)
+    // 每来一路远端音轨就挂一个 <audio>，由浏览器负责播放。
+    pc.ontrack = (e) => {
+      const audio = new Audio()
+      audio.srcObject = e.streams[0]
+      audio.play().catch(() => {})
+    }
+    // 客户端先出 offer：把麦克风轨道发布出去，服务端在 answer 里回房间已有的音轨。
+    const offer = await pc.createOffer()
+    await pc.setLocalDescription(offer)
+    const res = await api.rtcOffer(roomId, offer.sdp ?? '')
+    await pc.setRemoteDescription({ type: 'answer', sdp: res.sdp })
+  } catch (e) {
+    gapNotice.value = '语音连接失败：' + (e as Error).message
+  }
+}
+
+// 服务端重协商的应答：先应用远端描述，再造 answer 回传。
+async function answerRTC(signal: { type: string; sdp: string; room_id: number }) {
+  if (!pc || signal.type !== 'offer') return
+  await pc.setRemoteDescription({ type: 'offer', sdp: signal.sdp })
+  const answer = await pc.createAnswer()
+  await pc.setLocalDescription(answer)
+  await api.rtcAnswer(signal.room_id, answer.sdp ?? '')
+}
+
 // 打开房间面板：每次现拉，在线人数是瞬时值。
 async function openRooms() {
   try {
@@ -416,6 +456,8 @@ async function enterRoom(room: { id: number; title: string }) {
   }
   showRooms.value = false
   await select(room.id)
+  // 进房即开麦：用户点「进入」就是浏览器要求的那个手势。
+  await joinAudio(room.id)
 }
 
 // 关房：只有房主能关；关掉后从房间列表消失。
