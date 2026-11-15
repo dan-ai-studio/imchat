@@ -13,7 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const SchemaVersion = 5
+const SchemaVersion = 6
 
 //go:embed schema.sql
 var schemaFS embed.FS
@@ -41,6 +41,11 @@ var upgrades = map[int][]string{
 		"CREATE TABLE IF NOT EXISTS community_invites (code TEXT PRIMARY KEY, community_id INTEGER NOT NULL REFERENCES communities(id) ON DELETE CASCADE, created_by INTEGER NOT NULL REFERENCES users(id), created_at INTEGER NOT NULL, used_by INTEGER NOT NULL DEFAULT 0, used_at INTEGER NOT NULL DEFAULT 0)",
 		"CREATE TABLE IF NOT EXISTS community_join_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, community_id INTEGER NOT NULL REFERENCES communities(id) ON DELETE CASCADE, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')), created_at INTEGER NOT NULL, decided_at INTEGER NOT NULL DEFAULT 0, decided_by INTEGER NOT NULL DEFAULT 0)",
 		"CREATE UNIQUE INDEX IF NOT EXISTS idx_join_pending ON community_join_requests(community_id, user_id) WHERE status = 'pending'",
+	},
+	// 5 → 6：审计表。越权尝试与成功动作都写，追责时两者缺一不可。
+	5: {
+		"CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, community_id INTEGER NOT NULL DEFAULT 0, actor_id INTEGER NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL DEFAULT '', detail TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL)",
+		"CREATE INDEX IF NOT EXISTS idx_audit_community ON audit_log(community_id, id)",
 	},
 }
 

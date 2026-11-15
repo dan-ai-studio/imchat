@@ -83,6 +83,10 @@ func (s *Server) Router() http.Handler {
 		r.Post("/api/join/{code}", s.handleJoinByInvite)
 		r.Post("/api/communities/{id}/requests", s.handleRequestJoin)
 		r.Get("/api/communities/{id}/requests", s.handleJoinRequests)
+		// 社群治理：改信息、移出成员、看审计。三者都要求社群管理员。
+		r.Patch("/api/communities/{id}", s.handleUpdateCommunity)
+		r.Delete("/api/communities/{id}/members/{uid}", s.handleRemoveCommunityMember)
+		r.Get("/api/communities/{id}/audit", s.handleAudit)
 		r.Post("/api/communities/{id}/requests/{rid}", s.handleDecideJoinRequest)
 		r.Get("/api/communities/{id}/conversations", s.handleCommunityConversations)
 		r.Post("/api/communities/{id}/conversations", s.handleCreateCommunityConversation)

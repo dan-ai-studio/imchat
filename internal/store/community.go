@@ -125,6 +125,48 @@ func (d *DB) ConversationInUserCommunity(ctx context.Context, conversationID, us
 	return n > 0, nil
 }
 
+// RemoveCommunityMember removes one member. The owner cannot be removed: a
+// community without an owner is not a valid state.
+func (d *DB) RemoveCommunityMember(ctx context.Context, communityID, userID int64) error {
+	return d.Write(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var role string
+		if err := tx.QueryRowContext(ctx,
+			"SELECT role FROM community_members WHERE community_id = ? AND user_id = ?", communityID, userID).Scan(&role); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNotCommunityMember
+			}
+			return err
+		}
+		// 群主不能被移出：社群没有主人就不再是有效状态。
+		if role == "owner" {
+			return ErrNotCommunityMember
+		}
+		_, err := tx.ExecContext(ctx,
+			"DELETE FROM community_members WHERE community_id = ? AND user_id = ?", communityID, userID)
+		return err
+	})
+}
+
+// UpdateCommunity changes the name and description of one community.
+func (d *DB) UpdateCommunity(ctx context.Context, communityID int64, name, description string) error {
+	return d.Write(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx,
+			"UPDATE communities SET name = ?, description = ? WHERE id = ?", name, description, communityID)
+		if err != nil {
+			return err
+		}
+		// 影响行数为 0 说明社群不存在：更新与「找不到」共用一条路径。
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
+}
+
 // AddCommunityMember is idempotent: joining twice keeps the original role.
 func (d *DB) AddCommunityMember(ctx context.Context, communityID, userID int64, role string) error {
 	return d.Write(ctx, func(ctx context.Context, tx *sql.Tx) error {

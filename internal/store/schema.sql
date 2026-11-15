@@ -54,6 +54,19 @@ CREATE TABLE IF NOT EXISTS community_members (
 );
 CREATE INDEX IF NOT EXISTS idx_community_members_user ON community_members(user_id);
 
+-- 审计：谁在什么时候对哪个对象做了什么。越权尝试也写进来，
+-- 因为「谁试过」和「谁做成了」同样重要。
+CREATE TABLE IF NOT EXISTS audit_log (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  community_id INTEGER NOT NULL DEFAULT 0,
+  actor_id     INTEGER NOT NULL,
+  action       TEXT    NOT NULL,
+  target       TEXT    NOT NULL DEFAULT '',
+  detail       TEXT    NOT NULL DEFAULT '',
+  created_at   INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_audit_community ON audit_log(community_id, id);
+
 -- 邀请码：凭码直接加入社群。码一次性，用过即废——所以它没有「剩余次数」，
 -- 只有一个 used_by；这样「码被谁用了」也能回答。
 CREATE TABLE IF NOT EXISTS community_invites (

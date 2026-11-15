@@ -16,6 +16,8 @@ import (
 func (s *Server) communityAdmin(w http.ResponseWriter, r *http.Request, c *store.Community, userID int64) bool {
 	role, err := s.DB.CommunityRole(r.Context(), c.ID, userID)
 	if err != nil || (role != "owner" && role != "admin") {
+		// 越权尝试也留痕：谁试过和谁做成了，追责时缺一不可。
+		_ = s.DB.AppendAudit(r.Context(), c.ID, userID, "denied", "community_admin", "")
 		writeErr(w, http.StatusForbidden, "forbidden", "community admin only")
 		return false
 	}
