@@ -103,6 +103,14 @@ func (s *Server) Router() http.Handler {
 		r.Post("/api/rooms/{id}/rtc/offer", s.handleRTCOffer)
 		r.Post("/api/rooms/{id}/rtc/answer", s.handleRTCAnswer)
 		r.Post("/api/rooms/{id}/rtc/leave", s.handleRTCLeave)
+		// 麦位：举手、邀请、批准、下麦。麦位是资源，不是权限。
+		// 麦位列表对房间内所有人可见，举手与下麦由本人发起。
+		r.Get("/api/rooms/{id}/seats", s.handleSeats)
+		r.Post("/api/rooms/{id}/seats/request", s.handleRequestSeat)
+		r.Post("/api/rooms/{id}/seats/invite", s.handleInviteSeat)
+		r.Post("/api/rooms/{id}/seats/{uid}/approve", s.handleApproveSeat)
+		// 下麦用 DELETE：麦位行被删掉，不留历史。
+		r.Delete("/api/rooms/{id}/seats/{uid}", s.handleLeaveSeat)
 		r.Get("/api/rooms/{id}/occupants", s.handleRoomOccupants)
 		r.Get("/api/communities/{id}/conversations", s.handleCommunityConversations)
 		r.Post("/api/communities/{id}/conversations", s.handleCreateCommunityConversation)

@@ -13,7 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const SchemaVersion = 7
+const SchemaVersion = 8
 
 //go:embed schema.sql
 var schemaFS embed.FS
@@ -53,6 +53,11 @@ var upgrades = map[int][]string{
 		"ALTER TABLE messages ADD COLUMN delivery TEXT NOT NULL DEFAULT 'at_least_once'",
 		"CREATE TABLE IF NOT EXISTS room_presence (conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, joined_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, PRIMARY KEY (conversation_id, user_id))",
 		"ALTER TABLE conversations ADD COLUMN closed_at INTEGER NOT NULL DEFAULT 0",
+	},
+	// 7 → 8：麦位。房间里可发言的位置，最多 16 个。
+	7: {
+		"CREATE TABLE IF NOT EXISTS room_seats (conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, position INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL CHECK (state IN ('invited','requested','on_mic')), updated_at INTEGER NOT NULL, PRIMARY KEY (conversation_id, user_id))",
+		"CREATE INDEX IF NOT EXISTS idx_seats_state ON room_seats(conversation_id, state)",
 	},
 }
 

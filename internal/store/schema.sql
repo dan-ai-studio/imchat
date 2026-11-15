@@ -165,6 +165,19 @@ CREATE TABLE IF NOT EXISTS room_presence (
   PRIMARY KEY (conversation_id, user_id)
 );
 
+-- 麦位：房间里可发言的位置，最多 16 个。
+-- state 取 invited（房主邀请）/ requested（举手待批）/ on_mic（在麦上）。
+-- 麦位是资源不是权限：掉线或退房时对应行会被删掉。
+CREATE TABLE IF NOT EXISTS room_seats (
+  conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  position        INTEGER NOT NULL DEFAULT 0,
+  state           TEXT    NOT NULL CHECK (state IN ('invited','requested','on_mic')),
+  updated_at      INTEGER NOT NULL,
+  PRIMARY KEY (conversation_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_seats_state ON room_seats(conversation_id, state);
+
 -- 一条「消息 × 接收者」的待投递记录。这就是「不丢」的载体：
 -- 它与消息同事务写入，只有收到 ack 才消解，没人 ack 就一直重投。
 -- attempts / next_at 是重试计数与下次尝试时间，last_error 只用于排障。

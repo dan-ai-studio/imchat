@@ -32,6 +32,8 @@ const showRequests = ref(false)
 const showRooms = ref(false)
 const rooms = ref<Array<{ id: number; title: string; owner_id: number; online: number }>>([])
 const newRoomTitle = ref('')
+// 麦位面板：只在房间里出现，展示谁在麦上、谁举手。
+const seats = ref<Array<{ user_id: number; display_name: string; position: number; state: string }>>([])
 const joinRequests = ref<Array<{ id: number; user_id: number; username: string; display_name: string }>>([])
 // 建群用的标题输入，与消息草稿分开：它们是两件不同的事。
 const newTitle = ref('')
@@ -448,6 +450,34 @@ async function createRoom() {
   }
 }
 
+// 拉麦位列表：进房与每次操作后都要刷新。
+async function loadSeats() {
+  if (!activeId.value) return
+  try {
+    seats.value = (await api.seats(activeId.value)).seats
+  } catch {
+    seats.value = []
+  }
+}
+
+// 举手申请上麦。
+async function requestSeat() {
+  await api.requestSeat(activeId.value)
+  await loadSeats()
+}
+
+// 房主批准某人上麦。
+async function approveSeat(uid: number) {
+  await api.approveSeat(activeId.value, uid)
+  await loadSeats()
+}
+
+// 自己下麦，或房主把人抱下麦。
+async function leaveSeat(uid: number) {
+  await api.leaveSeat(activeId.value, uid)
+  await loadSeats()
+}
+
 // 进房：先登记在场，再把房间补进本地会话列表并选中它。
 async function enterRoom(room: { id: number; title: string }) {
   await api.enterRoom(room.id)
@@ -458,6 +488,7 @@ async function enterRoom(room: { id: number; title: string }) {
   await select(room.id)
   // 进房即开麦：用户点「进入」就是浏览器要求的那个手势。
   await joinAudio(room.id)
+  await loadSeats()
 }
 
 // 关房：只有房主能关；关掉后从房间列表消失。
@@ -778,6 +809,24 @@ watch(activeId, () => (gapNotice.value = ''))
             </span>
           </li>
         </ul>
+        <!-- 麦位：谁在麦上、谁举手；房主能批准，本人能下麦。 -->
+        <div v-if="activeId" class="seats">
+          <div class="seats-head">
+            <strong>麦位</strong>
+            <button class="tiny" @click="requestSeat">举手</button>
+          </div>
+          <!-- 每行一个麦位：位置编号、名字、状态。 -->
+          <ul>
+            <li v-for="s in seats" :key="s.user_id">
+              <span>{{ s.position + 1 }}. {{ s.display_name }}</span>
+              <span class="muted">{{ s.state }}</span>
+              <span class="mops">
+                <button v-if="s.state !== 'on_mic'" class="tiny" @click="approveSeat(s.user_id)">批准</button>
+                <button v-if="s.user_id === me.id || s.state === 'on_mic'" class="tiny" @click="leaveSeat(s.user_id)">下麦</button>
+              </span>
+            </li>
+          </ul>
+        </div>
         <!-- 开房只需要一个名字：房主建完立刻在场。 -->
         <input v-model="newRoomTitle" placeholder="新房间名称" />
         <div class="row-actions">

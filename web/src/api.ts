@@ -124,6 +124,16 @@ export const api = {
   rtcAnswer: (roomId: number, sdp: string) =>
     req<{ ok: boolean }>('/api/rooms/' + roomId + '/rtc/answer', json({ sdp })),
   rtcLeave: (roomId: number) => req<{ ok: boolean }>('/api/rooms/' + roomId + '/rtc/leave', { method: 'POST' }),
+  // 麦位：举手、上麦、下麦。麦位是资源，不是权限。
+  seats: (roomId: number) =>
+    req<{ seats: Array<{ user_id: number; display_name: string; position: number; state: string }>; max: number }>(
+      '/api/rooms/' + roomId + '/seats',
+    ),
+  requestSeat: (roomId: number) => req<{ ok: boolean }>('/api/rooms/' + roomId + '/seats/request', { method: 'POST' }),
+  approveSeat: (roomId: number, uid: number) =>
+    req<{ ok: boolean }>('/api/rooms/' + roomId + '/seats/' + uid + '/approve', { method: 'POST' }),
+  leaveSeat: (roomId: number, uid: number) =>
+    req<{ ok: boolean }>('/api/rooms/' + roomId + '/seats/' + uid, { method: 'DELETE' }),
   // 加入社群的两条路：邀请码直接加入；没有码就提交申请，等管理员审批。
   createInvite: (communityId: number) =>
     req<{ code: string; community_id: number }>('/api/communities/' + communityId + '/invites', { method: 'POST' }),
