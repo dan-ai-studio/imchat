@@ -55,7 +55,7 @@
 
 ## 快速开始
 
-```
+```bash
 # 需要 Go 1.24+
 go build -o bin/imchat.exe ./cmd/imchat
 ./bin/imchat.exe                      # 默认 127.0.0.1:8080，数据在 ./data/imchat.db
@@ -64,49 +64,16 @@ go build -o bin/imchat.exe ./cmd/imchat
 首次启动会种下演示数据：`alice` / `bob`，密码都是 `password123`，以及一个两人会话。
 开两个浏览器（或一个普通窗口 + 一个隐身窗口）分别登录即可互发消息。
 
-## 验证
+## 功能
 
-自动化测试直接断言那四条承诺：
-
-```
-go test ./internal/store/ -v
-```
-
-- `TestReliability`：40 条消息，无丢失、无重复行、无乱序、无空洞；重发幂等
-- `TestConcurrentSendsKeepSequenceDense`：8 个 goroutine 并发写 80 条，序号仍然稠密
-- `TestOutboxResolvesOnlyOnAck`：投递只有 ack 才消解；未 ack 会被重投
-
-端到端（需要 Node 22+）：
-
-```
-go build -o bin/imchat.exe ./cmd/imchat
-./bin/imchat.exe -addr 127.0.0.1:18081 -db ./data/e2e.db &
-node scripts/e2e.mjs
-```
-
-它会登录两个账号、各自建立 WebSocket、发一条消息、断言双方都收到、bob 回 ack，
-最后检查 outbox 从 pending 变为 done。
-
-## 目录
-
-```
-cmd/imchat/          进程入口：装配 store / bus / hub / api，优雅关闭
-internal/api/        HTTP 路由与 WebSocket 升级，唯一写路径 SendMessage
-internal/auth/       bcrypt + 服务端 session（无状态 JWT 在这里是负债）
-internal/store/      SQLite：单写者、schema、消息序号、outbox
-internal/bus/        进程内 NATS，仅做扇出
-internal/ws/         连接、帧协议、Hub
-internal/delivery/   outbox → bus 的投递器
-docs/adr/            设计决策记录
-GLOSSARY.md          领域词汇表（先读这个）
-```
-
-## 设计决策
-
-- [ADR-0001 单机单文件：SQLite + Go 单二进制](docs/adr/0001-sqlite-single-file-deployment.md)
-- [ADR-0002 实时通道：原生 WebSocket + 自定义帧](docs/adr/0002-native-websocket.md)
-- [ADR-0003 嵌入 broker 作为扇出总线](docs/adr/0003-embedded-broker.md)
-- [ADR-0004 投递承诺：至少一次](docs/adr/0004-at-least-once-delivery.md)
+- **单聊与群聊**：群可建、可加人、可移出；群主不可被移出
+- **会话内治理**：owner / admin / member 三种角色，禁言带过期时间
+- **消息**：文本、图片（二进制落盘，消息表只存文件名）、撤回
+- **@提醒**：服务端解析 `@username` 写入消息的 `meta.mentions`，前端高亮
+- **已读位点**：按设备记录，用户级取各端最大值
+- **断线补齐**：重连时按 `last_seq` 拉缺口，界面提示补了多少条
+- **全文搜索**：FTS5 索引，中英文都能命中
+- **管理台**：用户、会话、消息检索、投递队列、封禁与踢下线
 
 ## 管理台
 
@@ -129,23 +96,66 @@ GLOSSARY.md          领域词汇表（先读这个）
 客户端 → 服务端：`hello` / `send` / `ack` / `read` / `ping`
 服务端 → 客户端：`ready` / `msg` / `sent` / `pong` / `error`
 
-```
-// 客户端发送
-{"type":"send","client_msg_id":"uuid","conversation_id":1,"kind":"text","body":"hi"}
+```jsonc
+// 客户端发送（kind 为 text 或 image；图片消息的 body 是上传返回的文件名）
+{"type":"send","client_msg_id":"uuid","conversation_id":1,"kind":"text","body":"@Bob ping"}
 // 客户端确认收到（这是唯一让待投递记录消解的帧）
 {"type":"ack","conversation_id":1,"seq":7}
 // 服务端下发
-{"type":"msg","conversation_id":1,"seq":7,"id":"...","sender_id":2,"kind":"text","body":"hi","created_at":1763...}
+{"type":"msg","conversation_id":1,"seq":7,"id":"...","sender_id":2,"kind":"text",
+ "body":"@Bob ping","meta":"{\"mentions\":[2]}","created_at":1763...}
 ```
 
-## 状态
+撤回不是协议帧，而是一条普通消息：`kind=recall`，`recall_of` 指向被撤回的 seq
+（[ADR-0005](docs/adr/0005-recall-as-tombstone.md)）。它因此复用同一套序号、投递与补齐。
 
-已完成：
+## 验证
 
-- 存储层：单写者、会话序号、outbox
-- 认证：bcrypt + 服务端 session
-- HTTP API、WebSocket 传输、投递器
-- 前端：登录、聊天、断线补齐、管理台
-- 可靠性测试与端到端脚本
+```bash
+go test ./internal/store/ -v
+```
 
-未开始：图片消息、撤回、@提醒、FTS5 搜索、群聊创建与群管理。
+- `TestReliability`：40 条消息，无丢失、无重复行、无乱序、无空洞；重发幂等
+- `TestConcurrentSendsKeepSequenceDense`：8 个 goroutine 并发写 80 条，序号仍然稠密
+- `TestOutboxResolvesOnlyOnAck`：投递只有 ack 才消解；未 ack 会被重投
+- `TestRecallAppendsTombstone`：撤回追加墓碑，原消息不被修改；越权与重复撤回被拒
+- `TestGroupLifecycleAndMute`：群创建、成员、移出、禁言、角色
+- `TestCleanCloseLeavesSingleFile`：干净退出后目录里只有一个 `.db` 文件
+
+端到端（需要 Node 22+，会真的走 WebSocket、上传、撤回、搜索）：
+
+```bash
+go build -o bin/imchat.exe ./cmd/imchat
+./bin/imchat.exe -addr 127.0.0.1:18081 -db ./data/e2e.db &
+node scripts/e2e.mjs
+```
+
+## 目录
+
+```
+cmd/imchat/          进程入口：装配 store / bus / hub / api，优雅关闭
+internal/api/        HTTP 路由、WebSocket 升级、上传与文件服务，唯一写路径 SendMessage
+internal/auth/       bcrypt + 服务端 session（无状态 JWT 在这里是负债）
+internal/store/      SQLite：单写者、schema 迁移、消息序号、outbox、FTS5
+internal/bus/        进程内 NATS，仅做扇出
+internal/ws/         连接、帧协议、Hub
+internal/delivery/   outbox → bus 的投递器
+web/                 Vue 3 + Vite 前端，构建产物通过 go:embed 编进二进制
+docs/adr/            设计决策记录
+GLOSSARY.md          领域词汇表（先读这个）
+```
+
+## 设计决策
+
+- [ADR-0001 单机单文件：SQLite + Go 单二进制](docs/adr/0001-sqlite-single-file-deployment.md)
+- [ADR-0002 实时通道：原生 WebSocket + 自定义帧](docs/adr/0002-native-websocket.md)
+- [ADR-0003 嵌入 broker 作为扇出总线](docs/adr/0003-embedded-broker.md)
+- [ADR-0004 投递承诺：至少一次](docs/adr/0004-at-least-once-delivery.md)
+- [ADR-0005 撤回是追加，不是修改](docs/adr/0005-recall-as-tombstone.md)
+
+## 已知限制
+
+- 单写者决定了写并发上限；这是刻意的取舍，不是待修的问题
+- `hello` 帧目前只用于握手，缺口补齐由客户端在 `open` 时主动调用 HTTP 接口完成
+- FTS5 使用 unicode61 分词，中文按字切分，长句检索精度不如专门的 CJK 分词器
+- 单机部署，没有多实例与横向扩展的运行时证据（只有设计论述）
