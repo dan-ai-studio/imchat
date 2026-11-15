@@ -28,6 +28,10 @@ const showCreate = ref(false)
 const showJoin = ref(false)
 const joinCode = ref('')
 const showRequests = ref(false)
+// 房间面板：列表、建房、进场。房间不在会话列表里，进场后才补进去。
+const showRooms = ref(false)
+const rooms = ref<Array<{ id: number; title: string; owner_id: number; online: number }>>([])
+const newRoomTitle = ref('')
 const joinRequests = ref<Array<{ id: number; user_id: number; username: string; display_name: string }>>([])
 // 建群用的标题输入，与消息草稿分开：它们是两件不同的事。
 const newTitle = ref('')
@@ -382,6 +386,44 @@ async function onCommunityChange() {
   if (conversations.value.length) await select(conversations.value[0].id)
 }
 
+// 打开房间面板：每次现拉，在线人数是瞬时值。
+async function openRooms() {
+  try {
+    rooms.value = (await api.rooms(activeCommunity.value)).rooms
+    showRooms.value = true
+  } catch (e) {
+    gapNotice.value = (e as Error).message
+  }
+}
+
+// 建房：建完立刻进去，房主默认在场。
+async function createRoom() {
+  const title = newRoomTitle.value.trim() || '新房间'
+  try {
+    const r = await api.createRoom(activeCommunity.value, title)
+    newRoomTitle.value = ''
+    await enterRoom(r)
+  } catch (e) {
+    gapNotice.value = '建房失败：' + (e as Error).message
+  }
+}
+
+// 进房：先登记在场，再把房间补进本地会话列表并选中它。
+async function enterRoom(room: { id: number; title: string }) {
+  await api.enterRoom(room.id)
+  if (!conversations.value.some((c) => c.id === room.id)) {
+    conversations.value = [...conversations.value, { id: room.id, kind: 'room', title: room.title, next_seq: 0 }]
+  }
+  showRooms.value = false
+  await select(room.id)
+}
+
+// 关房：只有房主能关；关掉后从房间列表消失。
+async function closeRoom(id: number) {
+  await api.closeRoom(id)
+  await openRooms()
+}
+
 // 当前社群里「我」是不是管理员：决定邀请与审批按钮出不出现。
 const isCommunityAdmin = computed(() => {
   const c = communities.value.find((x) => x.id === activeCommunity.value)
@@ -547,6 +589,8 @@ watch(activeId, () => (gapNotice.value = ''))
         <button class="newgroup" @click="openCreate">+ 新建群聊</button>
         <!-- 没有码的人走「加入」弹窗；有码的人一步进群。 -->
         <button class="newgroup" @click="showJoin = true">+ 加入社群</button>
+        <!-- 房间是独立入口：它不在会话列表里，进场后才补进去。 -->
+        <button class="newgroup" @click="openRooms">房间</button>
       </div>
 
       <!-- 底部状态条：连接状态与待投递队列深度。 -->
@@ -674,6 +718,28 @@ watch(activeId, () => (gapNotice.value = ''))
           <button class="ghost" @click="showCreate = false">取消</button>
           <!-- 创建：走 /api/conversations，成功后关弹窗并切到新群。 -->
           <button class="primary" @click="createGroup">创建</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 房间面板：列表带在线人数，房主多一个「关房」。 -->
+    <div v-if="showRooms" class="modal">
+      <div class="sheet">
+        <h3>房间</h3>
+        <!-- 每行一间房：在线人数是进场时拉到的瞬时值。 -->
+        <ul class="picks">
+          <li v-for="r in rooms" :key="r.id">
+            <span>{{ r.title }} <span class="muted">在线 {{ r.online }}</span></span>
+            <span class="mops">
+              <button class="tiny" @click="enterRoom(r)">进入</button>
+              <button v-if="r.owner_id === me.id" class="tiny" @click="closeRoom(r.id)">关房</button>
+            </span>
+          </li>
+        </ul>
+        <input v-model="newRoomTitle" placeholder="新房间名称" />
+        <div class="row-actions">
+          <button class="ghost" @click="showRooms = false">关闭</button>
+          <button class="primary" @click="createRoom">开房</button>
         </div>
       </div>
     </div>

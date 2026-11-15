@@ -108,6 +108,16 @@ export const api = {
       '/api/communities/' + communityId + '/conversations',
       json({ kind: 'group', title, members }),
     ),
+  // 房间：以在场为核心的会话。消息走广播，不进待投递队列。
+  rooms: (communityId: number) =>
+    req<{ rooms: Array<{ id: number; kind: string; title: string; owner_id: number; online: number }> }>(
+      '/api/communities/' + communityId + '/rooms',
+    ),
+  createRoom: (communityId: number, title: string) =>
+    req<{ id: number; title: string }>('/api/communities/' + communityId + '/rooms', json({ title })),
+  enterRoom: (id: number) => req<{ id: number; online: number }>('/api/rooms/' + id + '/enter', { method: 'POST' }),
+  leaveRoom: (id: number) => req<{ ok: boolean }>('/api/rooms/' + id + '/leave', { method: 'POST' }),
+  closeRoom: (id: number) => req<{ ok: boolean }>('/api/rooms/' + id + '/close', { method: 'POST' }),
   // 加入社群的两条路：邀请码直接加入；没有码就提交申请，等管理员审批。
   createInvite: (communityId: number) =>
     req<{ code: string; community_id: number }>('/api/communities/' + communityId + '/invites', { method: 'POST' }),
