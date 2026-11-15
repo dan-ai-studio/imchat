@@ -140,10 +140,13 @@ func (s *Server) Router() http.Handler {
 		r.Post("/api/reports/{id}/escalate", s.handleEscalateReport)
 		r.Post("/api/reports/{id}/appeals", s.handleCreateAppeal)
 		// 平台管理员才有申诉与基线的处置权：它们是平台级对象，不是社群级。
+		// 运营看板：平台管理员视角的聚合数字。
+		r.With(s.requireAdmin).Get("/api/admin/dashboard", s.handleDashboard)
 		r.With(s.requireAdmin).Get("/api/appeals", s.handleAppeals)
 		r.With(s.requireAdmin).Post("/api/appeals/{id}/decide", s.handleDecideAppeal)
 		r.With(s.requireAdmin).Post("/api/baselines", s.handleAddBaseline)
 		r.With(s.requireAdmin).Get("/api/baselines", s.handleBaselines)
+		// 等级是公开展示值：登录用户都能读，不套管理员门。
 		r.Get("/api/levels/{uid}", s.handleLevel)
 		r.Get("/api/levels", s.handleLevels)
 		r.Get("/api/stats", s.handleStats)

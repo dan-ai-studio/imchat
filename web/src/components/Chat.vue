@@ -34,6 +34,8 @@ const rooms = ref<Array<{ id: number; title: string; owner_id: number; online: n
 const newRoomTitle = ref('')
 // 麦位面板：只在房间里出现，展示谁在麦上、谁举手。
 const seats = ref<Array<{ user_id: number; display_name: string; position: number; state: string }>>([])
+// 运营看板：只有平台管理员能拉到；其他人这里保持 null。
+const board = ref<{ rooms: number; room_online: number; messages_24h: number; users: number; reports_open: number; appeals_open: number } | null>(null)
 // 自己的等级：侧栏展示用，不参与任何权限判断。
 const myLevel = ref<{ level: number; exp: number; next_at: number } | null>(null)
 const joinRequests = ref<Array<{ id: number; user_id: number; username: string; display_name: string }>>([])
@@ -470,6 +472,15 @@ async function enableVideo() {
   }
 }
 
+// 拉运营看板：平台管理员才拉得到，失败就当没有。
+async function loadBoard() {
+  try {
+    board.value = await api.dashboard()
+  } catch {
+    board.value = null
+  }
+}
+
 // 拉自己的等级：进页面与每次发言后刷新一次。
 async function loadLevel() {
   try {
@@ -640,6 +651,7 @@ onMounted(async () => {
   if (conversations.value.length) await select(conversations.value[0].id)
   // 等级是展示值，进页面拉一次就够。
   await loadLevel()
+  await loadBoard()
   // 统计数字两秒刷一次：它是运维视角，不需要实时。
   statsTimer = window.setInterval(refreshStats, 2000)
   refreshStats()
@@ -666,6 +678,11 @@ watch(activeId, () => (gapNotice.value = ''))
         <span class="dot" :class="status" />
         <strong>imchat</strong>
         <span class="who">{{ me.display_name }}<template v-if="myLevel"> · Lv.{{ myLevel.level }}</template></span>
+        <!-- 看板只在平台管理员那里有值；其他人看不到这一行。 -->
+        <span v-if="board" class="muted board">
+          房 {{ board.rooms }} · 在场 {{ board.room_online }} · 24h 消息 {{ board.messages_24h }} ·
+          用户 {{ board.users }} · 待决举报 {{ board.reports_open }} · 申诉 {{ board.appeals_open }}
+        </span>
       </div>
 
       <!-- 社群切换器：会话列表属于当前社群，换社群等于换一份列表。 -->

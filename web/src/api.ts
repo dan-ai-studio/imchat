@@ -126,6 +126,13 @@ export const api = {
   rtcAnswer: (roomId: number, sdp: string) =>
     req<{ ok: boolean }>('/api/rooms/' + roomId + '/rtc/answer', json({ sdp })),
   rtcLeave: (roomId: number) => req<{ ok: boolean }>('/api/rooms/' + roomId + '/rtc/leave', { method: 'POST' }),
+  // 运营看板：平台管理员视角的聚合数字。
+  dashboard: () =>
+    req<{
+      rooms: number; room_online: number; messages: number; messages_24h: number
+      communities: number; users: number; reports_open: number; appeals_open: number
+      level_buckets: Record<string, number>
+    }>('/api/admin/dashboard'),
   // 等级：只读展示值，不参与任何权限判断。
   level: (uid: number) =>
     req<{ user_id: number; level: number; exp: number; next_at: number }>('/api/levels/' + uid),
