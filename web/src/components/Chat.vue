@@ -450,6 +450,24 @@ async function createRoom() {
   }
 }
 
+// 开摄像头：向已有连接追加一条视频轨，然后重新协商。
+// 1v1 视频与多人视频走同一条路径，区别只在房间里坐了几个人。
+async function enableVideo() {
+  if (!pc) return
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true })
+    // 视频轨加进同一条连接：不新建 PeerConnection，也不重进房间。
+    for (const t of stream.getTracks()) pc.addTrack(t, stream)
+    const offer = await pc.createOffer()
+    await pc.setLocalDescription(offer)
+    const res = await api.rtcRenegotiate(activeId.value, offer.sdp ?? '')
+    await pc.setRemoteDescription({ type: 'answer', sdp: res.sdp })
+    gapNotice.value = '摄像头已开启'
+  } catch (e) {
+    gapNotice.value = '开摄像头失败：' + (e as Error).message
+  }
+}
+
 // 拉麦位列表：进房与每次操作后都要刷新。
 async function loadSeats() {
   if (!activeId.value) return
@@ -814,6 +832,7 @@ watch(activeId, () => (gapNotice.value = ''))
           <div class="seats-head">
             <strong>麦位</strong>
             <button class="tiny" @click="requestSeat">举手</button>
+            <button class="tiny" @click="enableVideo">开视频</button>
           </div>
           <!-- 每行一个麦位：位置编号、名字、状态。 -->
           <ul>

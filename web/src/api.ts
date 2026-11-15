@@ -121,6 +121,8 @@ export const api = {
   // 媒体信令：一次 offer/answer 建连；重协商的 answer 也走同一个形状。
   rtcOffer: (roomId: number, sdp: string) =>
     req<{ type: string; sdp: string }>('/api/rooms/' + roomId + '/rtc/offer', json({ sdp })),
+  rtcRenegotiate: (roomId: number, sdp: string) =>
+    req<{ type: string; sdp: string }>('/api/rooms/' + roomId + '/rtc/renegotiate', json({ sdp })),
   rtcAnswer: (roomId: number, sdp: string) =>
     req<{ ok: boolean }>('/api/rooms/' + roomId + '/rtc/answer', json({ sdp })),
   rtcLeave: (roomId: number) => req<{ ok: boolean }>('/api/rooms/' + roomId + '/rtc/leave', { method: 'POST' }),

@@ -102,6 +102,7 @@ func (s *Server) Router() http.Handler {
 		// 媒体信令：一次 offer/answer 建连，之后服务端主动 offer 重协商。
 		r.Post("/api/rooms/{id}/rtc/offer", s.handleRTCOffer)
 		r.Post("/api/rooms/{id}/rtc/answer", s.handleRTCAnswer)
+		r.Post("/api/rooms/{id}/rtc/renegotiate", s.handleRTRenegotiate)
 		r.Post("/api/rooms/{id}/rtc/leave", s.handleRTCLeave)
 		// 麦位：举手、邀请、批准、下麦。麦位是资源，不是权限。
 		// 麦位列表对房间内所有人可见，举手与下麦由本人发起。

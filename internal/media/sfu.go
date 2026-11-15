@@ -7,6 +7,7 @@ package media
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 
 	"github.com/pion/webrtc/v4"
@@ -177,6 +178,26 @@ func (r *Room) renegotiate(p *Participant) {
 	}
 	_ = r.push(p.userID, payload)
 }
+
+// Renegotiate lets an existing participant add a track (video, a second
+// microphone) without rebuilding the connection: the client offers again and
+// the server answers. It is the counterpart of Join for an already-open peer.
+func (r *Room) Renegotiate(userID int64, offer webrtc.SessionDescription) (webrtc.SessionDescription, error) {
+	r.mu.Lock()
+	p, ok := r.peers[userID]
+	r.mu.Unlock()
+	if !ok {
+		return webrtc.SessionDescription{}, ErrNoPeer
+	}
+	if err := p.pc.SetRemoteDescription(offer); err != nil {
+		return webrtc.SessionDescription{}, err
+	}
+	return p.pc.CreateAnswer(nil)
+}
+
+// ErrNoPeer is returned when a renegotiation arrives for someone who is not
+// connected any more.
+var ErrNoPeer = errors.New("media: no peer connection for this user")
 
 // AcceptAnswer applies the answer a client sent back after a renegotiation.
 func (r *Room) AcceptAnswer(userID int64, answer webrtc.SessionDescription) error {
