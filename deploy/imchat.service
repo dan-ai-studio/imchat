@@ -1,6 +1,6 @@
 [Unit]
 Description=imchat single-file messenger
-Documentation=https://github.com/yourname/imchat
+Documentation=https://github.com/dan-ai-studio/imchat
 After=network-online.target
 Wants=network-online.target
 
