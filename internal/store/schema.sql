@@ -81,6 +81,26 @@ CREATE TABLE IF NOT EXISTS moderation_actions (
 );
 CREATE INDEX IF NOT EXISTS idx_actions_report ON moderation_actions(report_id);
 
+-- 申诉：被处置者对处置结果的反驳。申诉在平台层处理，社群管理员看不到。
+CREATE TABLE IF NOT EXISTS appeals (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  report_id  INTEGER NOT NULL,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  reason     TEXT    NOT NULL DEFAULT '',
+  status     TEXT    NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','upheld','overturned')),
+  created_at INTEGER NOT NULL,
+  decided_at INTEGER NOT NULL DEFAULT 0,
+  decided_by INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_appeals_status ON appeals(status, id);
+
+-- 平台基线：命中即上交，社群管理员无权驳回。
+CREATE TABLE IF NOT EXISTS platform_baselines (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  pattern    TEXT    NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL
+);
+
 -- 等级：全站统一的成长刻度。只给特权与展示，不产生任何管理权。
 CREATE TABLE IF NOT EXISTS user_levels (
   user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,

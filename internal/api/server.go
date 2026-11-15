@@ -136,6 +136,14 @@ func (s *Server) Router() http.Handler {
 		r.Get("/api/communities/{id}/reports", s.handleReports)
 		r.Post("/api/reports/{id}/decide", s.handleDecideReport)
 		r.Get("/api/reports/{id}/actions", s.handleReportActions)
+		// 申诉只走平台：社群管理员看不到其他社群的申诉。
+		r.Post("/api/reports/{id}/escalate", s.handleEscalateReport)
+		r.Post("/api/reports/{id}/appeals", s.handleCreateAppeal)
+		// 平台管理员才有申诉与基线的处置权：它们是平台级对象，不是社群级。
+		r.With(s.requireAdmin).Get("/api/appeals", s.handleAppeals)
+		r.With(s.requireAdmin).Post("/api/appeals/{id}/decide", s.handleDecideAppeal)
+		r.With(s.requireAdmin).Post("/api/baselines", s.handleAddBaseline)
+		r.With(s.requireAdmin).Get("/api/baselines", s.handleBaselines)
 		r.Get("/api/levels/{uid}", s.handleLevel)
 		r.Get("/api/levels", s.handleLevels)
 		r.Get("/api/stats", s.handleStats)

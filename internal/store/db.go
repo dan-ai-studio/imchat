@@ -13,7 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const SchemaVersion = 11
+const SchemaVersion = 12
 
 //go:embed schema.sql
 var schemaFS embed.FS
@@ -74,6 +74,12 @@ var upgrades = map[int][]string{
 		"CREATE INDEX IF NOT EXISTS idx_reports_community ON reports(community_id, status, id)",
 		"CREATE TABLE IF NOT EXISTS moderation_actions (id INTEGER PRIMARY KEY AUTOINCREMENT, report_id INTEGER NOT NULL, community_id INTEGER NOT NULL, actor_id INTEGER NOT NULL, action TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL)",
 		"CREATE INDEX IF NOT EXISTS idx_actions_report ON moderation_actions(report_id)",
+	},
+	// 11 → 12：申诉与平台基线。申诉只走平台，社群管理员看不到。
+	11: {
+		"CREATE TABLE IF NOT EXISTS appeals (id INTEGER PRIMARY KEY AUTOINCREMENT, report_id INTEGER NOT NULL, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, reason TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','upheld','overturned')), created_at INTEGER NOT NULL, decided_at INTEGER NOT NULL DEFAULT 0, decided_by INTEGER NOT NULL DEFAULT 0)",
+		"CREATE INDEX IF NOT EXISTS idx_appeals_status ON appeals(status, id)",
+		"CREATE TABLE IF NOT EXISTS platform_baselines (id INTEGER PRIMARY KEY AUTOINCREMENT, pattern TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL)",
 	},
 }
 
