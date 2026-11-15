@@ -54,6 +54,33 @@ CREATE TABLE IF NOT EXISTS community_members (
 );
 CREATE INDEX IF NOT EXISTS idx_community_members_user ON community_members(user_id);
 
+-- 举报：谁举报了什么、为什么。target_kind 取 message / user。
+CREATE TABLE IF NOT EXISTS reports (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  community_id INTEGER NOT NULL REFERENCES communities(id) ON DELETE CASCADE,
+  reporter_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  target_kind  TEXT    NOT NULL CHECK (target_kind IN ('message','user')),
+  target_id    TEXT    NOT NULL,
+  reason       TEXT    NOT NULL DEFAULT '',
+  status       TEXT    NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','actioned','dismissed','escalated')),
+  created_at   INTEGER NOT NULL,
+  decided_at   INTEGER NOT NULL DEFAULT 0,
+  decided_by   INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_reports_community ON reports(community_id, status, id);
+
+-- 处置记录：每一次处置都留一行，被处置者据此看到原因。
+CREATE TABLE IF NOT EXISTS moderation_actions (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  report_id    INTEGER NOT NULL,
+  community_id INTEGER NOT NULL,
+  actor_id     INTEGER NOT NULL,
+  action       TEXT    NOT NULL,
+  note         TEXT    NOT NULL DEFAULT '',
+  created_at   INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_actions_report ON moderation_actions(report_id);
+
 -- 等级：全站统一的成长刻度。只给特权与展示，不产生任何管理权。
 CREATE TABLE IF NOT EXISTS user_levels (
   user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,

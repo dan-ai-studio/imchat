@@ -13,7 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const SchemaVersion = 10
+const SchemaVersion = 11
 
 //go:embed schema.sql
 var schemaFS embed.FS
@@ -67,6 +67,13 @@ var upgrades = map[int][]string{
 	// 9 → 10：房间的进入门槛。等级只给门槛与展示，不给任何管理动作。
 	9: {
 		"ALTER TABLE conversations ADD COLUMN min_level INTEGER NOT NULL DEFAULT 0",
+	},
+	// 10 → 11：举报与处置。举报进社群队列，处置留一行记录。
+	10: {
+		"CREATE TABLE IF NOT EXISTS reports (id INTEGER PRIMARY KEY AUTOINCREMENT, community_id INTEGER NOT NULL REFERENCES communities(id) ON DELETE CASCADE, reporter_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, target_kind TEXT NOT NULL CHECK (target_kind IN ('message','user')), target_id TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','actioned','dismissed','escalated')), created_at INTEGER NOT NULL, decided_at INTEGER NOT NULL DEFAULT 0, decided_by INTEGER NOT NULL DEFAULT 0)",
+		"CREATE INDEX IF NOT EXISTS idx_reports_community ON reports(community_id, status, id)",
+		"CREATE TABLE IF NOT EXISTS moderation_actions (id INTEGER PRIMARY KEY AUTOINCREMENT, report_id INTEGER NOT NULL, community_id INTEGER NOT NULL, actor_id INTEGER NOT NULL, action TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL)",
+		"CREATE INDEX IF NOT EXISTS idx_actions_report ON moderation_actions(report_id)",
 	},
 }
 

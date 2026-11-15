@@ -131,6 +131,11 @@ func (s *Server) Router() http.Handler {
 		r.Post("/api/conversations/{id}/send", s.handleSend)
 		r.Post("/api/conversations/{id}/recall", s.handleRecall)
 		// 等级：只读展示值，不参与任何权限判断。
+		// 举报：进社群队列，由社群管理员处置。
+		r.Post("/api/communities/{id}/reports", s.handleCreateReport)
+		r.Get("/api/communities/{id}/reports", s.handleReports)
+		r.Post("/api/reports/{id}/decide", s.handleDecideReport)
+		r.Get("/api/reports/{id}/actions", s.handleReportActions)
 		r.Get("/api/levels/{uid}", s.handleLevel)
 		r.Get("/api/levels", s.handleLevels)
 		r.Get("/api/stats", s.handleStats)
