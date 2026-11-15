@@ -1,0 +1,22 @@
+# Replace im.example.com with your domain.
+# Caddy obtains and renews the certificate automatically; no certbot needed.
+im.example.com {
+	encode zstd gzip
+
+	# WebSocket and API share the same upstream. Caddy forwards Upgrade by
+	# default; flush_interval -1 stops it from buffering streamed frames.
+	reverse_proxy 127.0.0.1:8080 {
+		flush_interval -1
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "same-origin"
+	}
+
+	log {
+		output file /var/log/caddy/imchat.log
+		format console
+	}
+}

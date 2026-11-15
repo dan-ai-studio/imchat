@@ -166,6 +166,22 @@ docs/adr/            设计决策记录
 GLOSSARY.md          领域词汇表（先读这个）
 ```
 
+## 部署
+
+完整步骤（交叉编译、systemd、Caddy/Nginx、防火墙、备份、升级、排障）见
+[docs/DEPLOY.md](docs/DEPLOY.md)。最短路径是三步：
+
+@@BT@@@@BT@@@@BT@@bash
+make release                                        # 交叉编译出 linux/amd64 等产物
+scp bin/imchat-linux-amd64 root@server:/opt/imchat/imchat
+ssh root@server '/opt/imchat/imchat -db /opt/imchat/data/imchat.db -create-user admin -password "强密码" -admin'
+@@BT@@@@BT@@@@BT@@
+
+然后套上 [deploy/imchat.service](deploy/imchat.service) 和
+[deploy/Caddyfile](deploy/Caddyfile)，HTTPS 与 WebSocket 都由 Caddy 处理。
+
+生产环境记得 `-seed=false`，并且用 `-backup` 做在线备份——**不要直接 `cp` 那个 .db 文件**。
+
 ## 设计决策
 
 - [ADR-0001 单机单文件：SQLite + Go 单二进制](docs/adr/0001-sqlite-single-file-deployment.md)

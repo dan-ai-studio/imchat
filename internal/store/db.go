@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"embed"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -138,6 +140,18 @@ func (d *DB) Close() error {
 		return err
 	}
 	return errR
+}
+
+// Backup writes a consistent snapshot with VACUUM INTO. Copying the .db file
+// while the server is running is unsafe under WAL: this is the supported way.
+func (d *DB) Backup(ctx context.Context, path string) error {
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+	_, err := d.wdb.ExecContext(ctx, "VACUUM INTO ?", path)
+	return err
 }
 
 func (d *DB) Migrate(ctx context.Context) error {

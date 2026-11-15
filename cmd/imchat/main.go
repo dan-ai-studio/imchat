@@ -27,7 +27,11 @@ import (
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8080", "listen address")
 	dbPath := flag.String("db", filepath.Join("data", "imchat.db"), "sqlite file path")
-	seed := flag.Bool("seed", true, "create demo users and a dm on first run")
+	seed := flag.Bool("seed", true, "create demo users and a dm on first run; never enable this in production")
+	backupTo := flag.String("backup", "", "write a consistent snapshot to this path, then exit")
+	createUser := flag.String("create-user", "", "create this account, then exit")
+	password := flag.String("password", "", "password for -create-user")
+	admin := flag.Bool("admin", false, "grant platform admin to -create-user")
 	flag.Parse()
 
 	if err := os.MkdirAll(filepath.Dir(*dbPath), 0o755); err != nil {
@@ -47,6 +51,30 @@ func main() {
 		log.Fatalf("migrate: %v", err)
 	}
 
+	// Maintenance commands run against the same binary, which keeps the
+	// deployment story at "one file": no sqlite3 CLI, no migration tool.
+	if *backupTo != "" {
+		if err := db.Backup(ctx, *backupTo); err != nil {
+			log.Fatalf("backup: %v", err)
+		}
+		log.Printf("backup written to %s", *backupTo)
+		return
+	}
+
+	am := auth.NewManager(db, 7*24*time.Hour)
+
+	if *createUser != "" {
+		if *password == "" {
+			log.Fatal("-password is required with -create-user")
+		}
+		u, err := am.Register(ctx, *createUser, *createUser, *password, *admin)
+		if err != nil {
+			log.Fatalf("create user: %v", err)
+		}
+		log.Printf("created user %q (admin=%v)", u.Username, u.IsAdmin)
+		return
+	}
+
 	b, err := bus.New()
 	if err != nil {
 		log.Fatalf("start bus: %v", err)
@@ -63,8 +91,6 @@ func main() {
 	}); err != nil {
 		log.Fatalf("subscribe: %v", err)
 	}
-
-	am := auth.NewManager(db, 7*24*time.Hour)
 
 	filesDir := filepath.Join(filepath.Dir(*dbPath), "files")
 	if err := os.MkdirAll(filesDir, 0o755); err != nil {

@@ -1,0 +1,29 @@
+[Unit]
+Description=imchat single-file messenger
+Documentation=https://github.com/yourname/imchat
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=imchat
+Group=imchat
+WorkingDirectory=/opt/imchat
+ExecStart=/opt/imchat/imchat -addr 127.0.0.1:8080 -db /opt/imchat/data/imchat.db -seed=false
+Restart=always
+RestartSec=3
+TimeoutStopSec=10
+LimitNOFILE=65535
+
+# Hardening: the process needs exactly one writable directory.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+ReadWritePaths=/opt/imchat/data
+
+[Install]
+WantedBy=multi-user.target
