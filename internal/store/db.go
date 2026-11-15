@@ -29,6 +29,8 @@ var upgrades = map[int][]string{
 	},
 }
 
+// writeReq is one queued write: the closure to run, plus the channel that
+// carries its error back to the caller.
 type writeReq struct {
 	ctx context.Context
 	fn  func(context.Context, *sql.Tx) error
@@ -49,6 +51,8 @@ type DB struct {
 	once   sync.Once
 }
 
+// Open builds the two handles: a small reader pool and a single writer
+// connection. Every pragma here is load-bearing; see the comments inline.
 func Open(path string) (*DB, error) {
 	dsn := "file:" + path +
 		"?_pragma=busy_timeout(5000)" +
@@ -56,6 +60,7 @@ func Open(path string) (*DB, error) {
 		"&_pragma=foreign_keys(1)" +
 		"&_pragma=synchronous(NORMAL)"
 
+	// 四个 pragma 各有理由：忙等 5 秒、WAL、外键打开、fsync 降一档。
 	rdb, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open reader: %w", err)
@@ -73,6 +78,7 @@ func Open(path string) (*DB, error) {
 	wdb.SetMaxOpenConns(1)
 	wdb.SetMaxIdleConns(1)
 
+	// 写队列给 256 格：够吸收一次突发，又能在真堵住时把压力传回去。
 	d := &DB{
 		rdb:    rdb,
 		wdb:    wdb,
@@ -87,7 +93,10 @@ func Open(path string) (*DB, error) {
 func (d *DB) Read() *sql.DB { return d.rdb }
 
 // Write runs fn inside a transaction owned by the single writer goroutine.
+// Write hands fn to the single writer goroutine and waits for its error. The two
+// selects are the interesting part: either half can lose the race to shutdown.
 func (d *DB) Write(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
+	// 先排队；排队阶段就要能被取消，不然关机会卡在一个排队中的写上。
 	req := writeReq{ctx: ctx, fn: fn, res: make(chan error, 1)}
 	select {
 	case d.writes <- req:
@@ -96,6 +105,7 @@ func (d *DB) Write(ctx context.Context, fn func(context.Context, *sql.Tx) error)
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+	// 再等结果；同样允许在关机和取消时放弃等待。
 	select {
 	case err := <-req.res:
 		return err
@@ -104,6 +114,8 @@ func (d *DB) Write(ctx context.Context, fn func(context.Context, *sql.Tx) error)
 	}
 }
 
+// writeLoop is the only goroutine that ever runs a write transaction, so writes
+// are serialised by construction rather than by a mutex.
 func (d *DB) writeLoop() {
 	for {
 		select {
@@ -115,6 +127,8 @@ func (d *DB) writeLoop() {
 	}
 }
 
+// exec runs one queued write inside its own transaction and reports the outcome
+// back on the request's channel.
 func (d *DB) exec(req writeReq) error {
 	tx, err := d.wdb.BeginTx(req.ctx, nil)
 	if err != nil {
@@ -127,11 +141,14 @@ func (d *DB) exec(req writeReq) error {
 	return tx.Commit()
 }
 
+// Close shuts the readers down first, then checkpoints and truncates the WAL,
+// then closes the writer last — so a clean exit leaves exactly one .db file.
 func (d *DB) Close() error {
 	d.once.Do(func() { close(d.done) })
 	// Close the readers first, then checkpoint and truncate the write-ahead log,
 	// then close the writer last. SQLite removes -wal/-shm when the final
 	// connection closes, so this leaves a single .db file behind.
+	// 顺序是刻意的：读者先走，WAL 才能被完整 checkpoint 掉。
 	errR := d.rdb.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	_, _ = d.wdb.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)")
@@ -154,7 +171,10 @@ func (d *DB) Backup(ctx context.Context, path string) error {
 	return err
 }
 
+// Migrate brings the file up to SchemaVersion: a fresh file gets schema.sql,
+// and the numbered steps above handle anything older.
 func (d *DB) Migrate(ctx context.Context) error {
+	// user_version 是 SQLite 自带的一个整数槽，正好用来记数据库版本。
 	var v int
 	if err := d.rdb.QueryRowContext(ctx, "PRAGMA user_version").Scan(&v); err != nil {
 		return fmt.Errorf("read user_version: %w", err)
@@ -163,17 +183,20 @@ func (d *DB) Migrate(ctx context.Context) error {
 		return nil
 	}
 	return d.Write(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		// 版本 0 表示空库：直接把 schema.sql 整份执行，一步到位。
 		cur := v
 		if cur == 0 {
 			body, err := schemaFS.ReadFile("schema.sql")
 			if err != nil {
 				return err
 			}
+			// 整份 schema.sql 一次执行：里面全是 IF NOT EXISTS，重复跑也安全。
 			if _, err := tx.ExecContext(ctx, string(body)); err != nil {
 				return err
 			}
 			cur = SchemaVersion
 		}
+		// 然后按版本号逐级补：每一步只跑一次，因为 user_version 会跟着往前走。
 		for ; cur < SchemaVersion; cur++ {
 			for _, stmt := range upgrades[cur] {
 				if _, err := tx.ExecContext(ctx, stmt); err != nil {

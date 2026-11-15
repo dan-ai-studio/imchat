@@ -6,7 +6,9 @@ import (
 	"errors"
 )
 
+// ConversationsOf lists the conversations one user belongs to, oldest id first.
 func (d *DB) ConversationsOf(ctx context.Context, userID int64) ([]*Conversation, error) {
+	// 用 members 做连接条件，比先查会话再过滤少一次往返，也顺带保证了「只返回你所在的」。
 	rows, err := d.rdb.QueryContext(ctx,
 		"SELECT c.id, c.kind, c.title, c.owner_id, c.next_seq, c.created_at FROM conversations c JOIN members m ON m.conversation_id = c.id WHERE m.user_id = ? ORDER BY c.id",
 		userID)
@@ -15,6 +17,7 @@ func (d *DB) ConversationsOf(ctx context.Context, userID int64) ([]*Conversation
 	}
 	defer rows.Close()
 	var out []*Conversation
+	// 逐行扫成结构体；顺序由 SQL 的 ORDER BY c.id 决定，不在这里排。
 	for rows.Next() {
 		c := &Conversation{}
 		if err := rows.Scan(&c.ID, &c.Kind, &c.Title, &c.OwnerID, &c.NextSeq, &c.CreatedAt); err != nil {
@@ -25,8 +28,11 @@ func (d *DB) ConversationsOf(ctx context.Context, userID int64) ([]*Conversation
 	return out, rows.Err()
 }
 
+// ConversationByID fetches one conversation, or ErrNotFound. It performs no
+// membership check: that belongs to the layer that knows who is asking.
 func (d *DB) ConversationByID(ctx context.Context, id int64) (*Conversation, error) {
 	c := &Conversation{}
+	// 单行查询：没有就是 ErrNotFound，调用方据此回 404，不必自己判空。
 	err := d.rdb.QueryRowContext(ctx,
 		"SELECT id, kind, title, owner_id, next_seq, created_at FROM conversations WHERE id = ?", id).
 		Scan(&c.ID, &c.Kind, &c.Title, &c.OwnerID, &c.NextSeq, &c.CreatedAt)
@@ -39,8 +45,11 @@ func (d *DB) ConversationByID(ctx context.Context, id int64) (*Conversation, err
 	return c, nil
 }
 
+// SetReadCursor advances one device's read position. It never moves backwards:
+// MAX keeps an out-of-order update from un-reading what was already read.
 func (d *DB) SetReadCursor(ctx context.Context, conversationID, userID int64, deviceID string, seq int64) error {
 	return d.Write(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		// 冲突时取 MAX：已读只能前进，不能因为一条乱序的旧请求而回退。
 		_, err := tx.ExecContext(ctx,
 			"INSERT INTO read_cursors (conversation_id, user_id, device_id, seq, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(conversation_id, user_id, device_id) DO UPDATE SET seq = MAX(seq, excluded.seq), updated_at = excluded.updated_at",
 			conversationID, userID, deviceID, seq, nowMillis())
