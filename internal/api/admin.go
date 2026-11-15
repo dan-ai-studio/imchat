@@ -109,7 +109,7 @@ func (s *Server) handleAdminMessages(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "missing_query", "q is required")
 		return
 	}
-	msgs, err := s.DB.SearchMessages(r.Context(), q, 100)
+	msgs, err := s.DB.SearchMessagesFTS(r.Context(), q, 100)
 	if err != nil {
 		writeErr(w, 500, "query_failed", err.Error())
 		return

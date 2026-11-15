@@ -66,7 +66,12 @@ func main() {
 
 	am := auth.NewManager(db, 7*24*time.Hour)
 
-	srvAPI := &api.Server{DB: db, Auth: am, Hub: hub}
+	filesDir := filepath.Join(filepath.Dir(*dbPath), "files")
+	if err := os.MkdirAll(filesDir, 0o755); err != nil {
+		log.Fatalf("create files dir: %v", err)
+	}
+
+	srvAPI := &api.Server{DB: db, Auth: am, Hub: hub, FilesDir: filesDir}
 	disp := delivery.New(db, b)
 	srvAPI.Dispatcher = disp
 	go disp.Run(ctx)
@@ -111,7 +116,7 @@ func assemble(apiHandler http.Handler) http.Handler {
 	files := http.FileServer(http.FS(sub))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
-		if p == "/ws" || p == "/healthz" || strings.HasPrefix(p, "/api/") {
+		if p == "/ws" || p == "/healthz" || strings.HasPrefix(p, "/api/") || strings.HasPrefix(p, "/files/") {
 			apiHandler.ServeHTTP(w, r)
 			return
 		}

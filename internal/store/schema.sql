@@ -73,3 +73,4 @@ CREATE TABLE IF NOT EXISTS outbox (
 );
 CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(state, next_at);
 CREATE INDEX IF NOT EXISTS idx_outbox_recipient ON outbox(recipient_id, state);
+CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(body, conv UNINDEXED, seq UNINDEXED, tokenize='unicode61');

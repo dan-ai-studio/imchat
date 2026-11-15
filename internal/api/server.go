@@ -23,6 +23,7 @@ type Server struct {
 	Auth       *auth.Manager
 	Hub        *ws.Hub
 	Dispatcher *delivery.Dispatcher
+	FilesDir   string
 }
 
 type ctxKey string
@@ -50,6 +51,8 @@ func (s *Server) Router() http.Handler {
 	r.Group(func(r chi.Router) {
 		r.Use(s.requireAuth)
 		r.Get("/api/me", s.handleMe)
+		r.Post("/api/upload", s.handleUpload)
+		r.Get("/files/{name}", s.handleFile)
 		r.Get("/api/users", s.handleUsers)
 		r.Get("/api/conversations", s.handleConversations)
 		r.Post("/api/conversations", s.handleCreateConversation)
@@ -232,7 +235,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		out = append(out, map[string]any{
 			"conversation_id": m.ConversationID, "seq": m.Seq, "id": m.ID,
 			"client_msg_id": m.ClientMsgID, "sender_id": m.SenderID,
-			"kind": m.Kind, "body": m.Body, "recall_of": m.RecallOf, "created_at": m.CreatedAt,
+			"kind": m.Kind, "body": m.Body, "meta": m.Meta, "recall_of": m.RecallOf, "created_at": m.CreatedAt,
 		})
 	}
 	writeJSON(w, 200, map[string]any{"messages": out})
@@ -262,13 +265,33 @@ func (s *Server) SendMessage(ctx context.Context, userID, convID int64, clientMs
 	if err != nil {
 		return nil, err
 	}
+	meta := "{}"
+	if kind == "text" {
+		if mlist, err := s.DB.MembersOf(ctx, convID); err == nil {
+			mentioned := make([]int64, 0, 2)
+			for _, m := range mlist {
+				if m.UserID == userID {
+					continue
+				}
+				if strings.Contains(body, "@"+m.Username) || strings.Contains(body, "@"+m.DisplayName) {
+					mentioned = append(mentioned, m.UserID)
+				}
+			}
+			if len(mentioned) > 0 {
+				if b, err := json.Marshal(map[string]any{"mentions": mentioned}); err == nil {
+					meta = string(b)
+				}
+			}
+		}
+	}
+
 	return s.DB.SendMessage(ctx, store.SendParams{
 		ConversationID: convID,
 		SenderID:       userID,
 		ClientMsgID:    clientMsgID,
 		Kind:           kind,
 		Body:           body,
-		Meta:           "{}",
+		Meta:           meta,
 		Recipients:     members,
 	})
 }

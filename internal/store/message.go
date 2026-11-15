@@ -63,6 +63,16 @@ func (d *DB) appendInTx(ctx context.Context, tx *sql.Tx, p SendParams, kind, bod
 		return nil, err
 	}
 
+	// Only human-readable bodies are searchable; an image message carries a
+	// file name in body and must not pollute the text index.
+	if kind == "text" {
+		if _, err := tx.ExecContext(ctx,
+			"INSERT INTO messages_fts (body, conv, seq) VALUES (?, ?, ?)",
+			body, p.ConversationID, msg.Seq); err != nil {
+			return nil, err
+		}
+	}
+
 	now := time.Now().UnixMilli()
 	for _, r := range p.Recipients {
 		if _, err := tx.ExecContext(ctx,

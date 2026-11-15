@@ -11,7 +11,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const SchemaVersion = 2
+const SchemaVersion = 3
 
 //go:embed schema.sql
 var schemaFS embed.FS
@@ -21,6 +21,10 @@ var schemaFS embed.FS
 // this entirely; an existing database walks these in order.
 var upgrades = map[int][]string{
 	1: {"ALTER TABLE messages ADD COLUMN recall_of INTEGER NOT NULL DEFAULT 0"},
+	2: {
+		"CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(body, conv UNINDEXED, seq UNINDEXED, tokenize='unicode61')",
+		"INSERT INTO messages_fts (body, conv, seq) SELECT body, conversation_id, seq FROM messages",
+	},
 }
 
 type writeReq struct {

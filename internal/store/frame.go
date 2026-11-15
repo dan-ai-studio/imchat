@@ -12,6 +12,7 @@ func FrameJSON(e *DueEntry) []byte {
 		"sender_id":       e.SenderID,
 		"kind":            e.Kind,
 		"body":            e.Body,
+		"meta":            e.Meta,
 		"created_at":      e.CreatedAt,
 	}
 	if e.RecallOf > 0 {

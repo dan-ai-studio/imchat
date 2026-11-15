@@ -20,6 +20,7 @@ export interface Message {
   sender_id: number
   kind: string
   body: string
+  meta?: string
   recall_of?: number
   created_at: number
 }
@@ -68,8 +69,20 @@ export const api = {
   conversations: () => req<{ conversations: Conversation[] }>('/api/conversations'),
   messages: (id: number, after = 0) =>
     req<{ messages: Message[] }>('/api/conversations/' + id + '/messages?after=' + after + '&limit=300'),
-  send: (id: number, body: string, clientMsgId: string) =>
-    req<{ seq: number; id: string }>('/api/conversations/' + id + '/send', json({ client_msg_id: clientMsgId, body })),
+  send: (id: number, body: string, clientMsgId: string, kind = 'text') =>
+    req<{ seq: number; id: string }>(
+      '/api/conversations/' + id + '/send',
+      json({ client_msg_id: clientMsgId, body, kind }),
+    ),
+  upload: async (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch('/api/upload', { method: 'POST', body: form, credentials: 'same-origin' })
+    const text = await res.text()
+    const data = text ? JSON.parse(text) : {}
+    if (!res.ok) throw new Error(data.message || 'upload failed')
+    return data as { id: string; url: string; bytes: number }
+  },
   recall: (id: number, seq: number) =>
     req<{ seq: number; recall_of: number }>('/api/conversations/' + id + '/recall', json({ seq })),
   stats: () => req<{ outbox: Record<string, number>; ws_conns: number }>('/api/stats'),

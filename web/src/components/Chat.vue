@@ -207,6 +207,36 @@ async function recallMessage(m: Message) {
   }
 }
 
+const fileInput = ref<HTMLInputElement | null>(null)
+
+function pickFile() {
+  fileInput.value?.click()
+}
+
+async function onFile(e: Event) {
+  const input = e.target as HTMLInputElement
+  const f = input.files?.[0]
+  input.value = ''
+  if (!f || !activeId.value) return
+  try {
+    const up = await api.upload(f)
+    await api.send(activeId.value, up.id, uuid(), 'image')
+  } catch (err) {
+    gapNotice.value = '上传失败：' + (err as Error).message
+  }
+}
+
+// Mentions live in meta, so the wire format needs no new field for them.
+function mentionsMe(m: Message): boolean {
+  if (!m.meta) return false
+  try {
+    const parsed = JSON.parse(m.meta)
+    return Array.isArray(parsed.mentions) && parsed.mentions.includes(props.me.id)
+  } catch {
+    return false
+  }
+}
+
 async function openCreate() {
   picked.value = []
   newTitle.value = ''
@@ -330,8 +360,17 @@ watch(activeId, () => (gapNotice.value = ''))
         <template v-for="m in messages" :key="m.conversation_id + ':' + m.seq">
           <div v-if="m.kind === 'recall'" class="sys">撤回了一条消息</div>
           <div v-else class="row" :class="{ mine: m.sender_id === me.id }">
-            <div class="bubble" :class="{ pending: m.seq < 0, revoked: recalledSeqs.has(m.seq) }">
-              <div class="body">{{ recalledSeqs.has(m.seq) ? '该消息已撤回' : m.body }}</div>
+            <div
+              class="bubble"
+              :class="{ pending: m.seq < 0, revoked: recalledSeqs.has(m.seq), mentioned: mentionsMe(m) }"
+            >
+              <img
+                v-if="!recalledSeqs.has(m.seq) && m.kind === 'image'"
+                class="pic"
+                :src="'/files/' + m.body"
+                alt="图片消息"
+              />
+              <div v-else class="body">{{ recalledSeqs.has(m.seq) ? '该消息已撤回' : m.body }}</div>
               <div class="meta">
                 <span
                   v-if="m.sender_id === me.id && m.seq > 0 && !recalledSeqs.has(m.seq)"
@@ -350,7 +389,13 @@ watch(activeId, () => (gapNotice.value = ''))
       <p v-if="gapNotice" class="notice">{{ gapNotice }}</p>
 
       <footer>
-        <input v-model="draft" placeholder="输入消息，回车发送" @keydown.enter.prevent="send" />
+        <input ref="fileInput" class="file" type="file" accept="image/*" @change="onFile" />
+        <button class="ghost" title="发送图片" @click="pickFile">图片</button>
+        <input
+          v-model="draft"
+          placeholder="输入消息，回车发送。用 @用户名 提醒对方"
+          @keydown.enter.prevent="send"
+        />
         <button class="primary" :disabled="!draft.trim()" @click="send">发送</button>
       </footer>
     </main>
@@ -439,6 +484,9 @@ watch(activeId, () => (gapNotice.value = ''))
 .row.mine .bubble { background: var(--accent); border-color: var(--accent); color: #fff; }
 .bubble.pending { opacity: .55; }
 .bubble.revoked { opacity: .5; font-style: italic; }
+.bubble.mentioned { box-shadow: 0 0 0 2px #d9a441; }
+.bubble .pic { max-width: 260px; max-height: 260px; border-radius: 10px; display: block; }
+.file { display: none; }
 .bubble .body { white-space: pre-wrap; word-break: break-word; }
 .bubble .meta { font-size: 10px; opacity: .6; margin-top: 3px; text-align: right; font-variant-numeric: tabular-nums; }
 .sys { text-align: center; color: var(--muted); font-size: 12px; padding: 2px 0; }
