@@ -736,6 +736,7 @@ watch(activeId, () => (gapNotice.value = ''))
             </span>
           </li>
         </ul>
+        <!-- 开房只需要一个名字：房主建完立刻在场。 -->
         <input v-model="newRoomTitle" placeholder="新房间名称" />
         <div class="row-actions">
           <button class="ghost" @click="showRooms = false">关闭</button>
