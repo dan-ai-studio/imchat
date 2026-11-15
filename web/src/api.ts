@@ -115,6 +115,7 @@ export const api = {
     req<{ community_id: number }>('/api/join/' + encodeURIComponent(code), { method: 'POST' }),
   requestJoin: (communityId: number) =>
     req<{ status: string }>('/api/communities/' + communityId + '/requests', { method: 'POST' }),
+  // 待审批列表只有社群管理员拿得到，服务端会再校验一次。
   joinRequests: (communityId: number) =>
     req<{ requests: Array<{ id: number; user_id: number; username: string; display_name: string; created_at: number }> }>(
       '/api/communities/' + communityId + '/requests',

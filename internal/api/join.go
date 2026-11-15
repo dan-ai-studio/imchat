@@ -64,6 +64,7 @@ func (s *Server) handleRequestJoin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "not_found", "community not found")
 		return
 	}
+	// 社群不存在与 id 非法回同一个 404：申请入口不暴露社群是否存在。
 	c, err := s.DB.CommunityByID(r.Context(), id)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, "not_found", "community not found")

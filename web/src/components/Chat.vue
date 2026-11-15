@@ -403,6 +403,7 @@ async function joinCommunity() {
   const code = joinCode.value.trim()
   if (!code) return
   try {
+    // 先入群再重拉列表：本地不知道新社群叫什么，必须问服务端。
     const res = await api.joinByInvite(code)
     communities.value = (await api.communities()).communities
     showJoin.value = false
@@ -693,6 +694,7 @@ watch(activeId, () => (gapNotice.value = ''))
     <div v-if="showRequests" class="modal">
       <div class="sheet">
         <h3>待审批（{{ joinRequests.length }}）</h3>
+        <!-- 每行两个人名与两个动作：批准会真的把人加进来。 -->
         <ul class="picks">
           <li v-for="r in joinRequests" :key="r.id">
             <span>{{ r.display_name }} <span class="muted">@{{ r.username }}</span></span>
@@ -702,6 +704,7 @@ watch(activeId, () => (gapNotice.value = ''))
             </span>
           </li>
         </ul>
+        <!-- 关闭只是收起面板，不改任何一条申请的状态。 -->
         <div class="row-actions">
           <button class="ghost" @click="showRequests = false">关闭</button>
         </div>
