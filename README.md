@@ -135,7 +135,7 @@ go test ./internal/store/ -v
 
 ```bash
 go build -o bin/imchat.exe ./cmd/imchat
-./bin/imchat.exe -addr 127.0.0.1:18081 -db ./data/e2e.db &
+./bin/imchat.exe -addr 127.0.0.1:18081 -db ./data/e2e.db -seed -open=false &
 node scripts/e2e.mjs
 ```
 
