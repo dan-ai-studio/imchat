@@ -30,10 +30,19 @@ func (d *DB) CreateUser(ctx context.Context, username, displayName, passwordHash
 		res, err := tx.ExecContext(ctx,
 			"INSERT INTO users (username, display_name, password_hash, is_admin, status, created_at) VALUES (?, ?, ?, ?, ?, ?)",
 			u.Username, u.DisplayName, passwordHash, admin, u.Status, u.CreatedAt)
+		// 插入失败直接回滚；账号与默认社群成员必须一起成立。
 		if err != nil {
 			return err
 		}
 		u.ID, err = res.LastInsertId()
+		if err != nil {
+			return err
+		}
+		// 新账号默认进默认社群：一个人至少要有一个可去的社群，
+		// 否则登录后是一片空白。
+		_, err = tx.ExecContext(ctx,
+			"INSERT OR IGNORE INTO community_members (community_id, user_id, role, joined_at) VALUES (?, ?, 'member', ?)",
+			DefaultCommunityID, u.ID, u.CreatedAt)
 		return err
 	})
 	// 事务错误直接上抛：这一层不重试，也不把错误翻译成别的形状。
@@ -95,14 +104,22 @@ func (d *DB) UserByID(ctx context.Context, id int64) (*User, error) {
 // CreateConversation inserts a conversation with next_seq at zero; only the
 // write path is allowed to advance that counter.
 func (d *DB) CreateConversation(ctx context.Context, kind, title string, ownerID int64) (*Conversation, error) {
+	// 旧调用方没有社群概念：一律落进默认社群，行为与升级前一致。
+	return d.CreateConversationIn(ctx, DefaultCommunityID, kind, title, ownerID)
+}
+
+// CreateConversationIn inserts a conversation inside one community. The
+// community dimension is written in the same row as the sequence counter, so a
+// conversation can never be read from the wrong community by accident.
+func (d *DB) CreateConversationIn(ctx context.Context, communityID int64, kind, title string, ownerID int64) (*Conversation, error) {
 	// 新会话的序号水位从 0 起，第一条消息拿到的就是 1。
 
-	c := &Conversation{Kind: kind, Title: title, OwnerID: ownerID, CreatedAt: time.Now().UnixMilli()}
+	c := &Conversation{CommunityID: communityID, Kind: kind, Title: title, OwnerID: ownerID, CreatedAt: time.Now().UnixMilli()}
 	err := d.Write(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx,
 			// next_seq 显式写 0：水位从这里开始，只由写路径递增。
-			"INSERT INTO conversations (kind, title, owner_id, next_seq, created_at) VALUES (?, ?, ?, 0, ?)",
-			c.Kind, c.Title, c.OwnerID, c.CreatedAt)
+			"INSERT INTO conversations (community_id, kind, title, owner_id, next_seq, created_at) VALUES (?, ?, ?, ?, 0, ?)",
+			c.CommunityID, c.Kind, c.Title, c.OwnerID, c.CreatedAt)
 		if err != nil {
 			return err
 		}

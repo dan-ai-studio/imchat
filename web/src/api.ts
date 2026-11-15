@@ -21,6 +21,14 @@ export interface Conversation {
   next_seq: number
 }
 
+// 社群：隔离与治理的边界。role 是「我」在这个社群里的身份。
+export interface Community {
+  id: number
+  name: string
+  description: string
+  role: string
+}
+
 // 一条消息。client_msg_id 只在发送方存在，是重发的幂等键。
 export interface Message {
   conversation_id: number
@@ -88,6 +96,18 @@ export const api = {
     req<{ ok: boolean }>('/api/conversations/' + id + '/members/' + uid, { method: 'DELETE' }),
   reads: (id: number) =>
     req<{ reads: Array<{ user_id: number; seq: number }> }>('/api/conversations/' + id + '/reads'),
+  // 社群：列表只返回我加入的；会话列表按社群取，隔离由服务端保证。
+  communities: () => req<{ communities: Community[] }>('/api/communities'),
+  createCommunity: (name: string, description = '') =>
+    req<{ id: number; name: string }>('/api/communities', json({ name, description })),
+  communityConversations: (id: number) =>
+    req<{ conversations: Conversation[] }>('/api/communities/' + id + '/conversations'),
+  // 建群必须指定社群：会话的社群维度在创建时固定，之后不改。
+  createCommunityGroup: (communityId: number, title: string, members: number[]) =>
+    req<{ id: number; title: string }>(
+      '/api/communities/' + communityId + '/conversations',
+      json({ kind: 'group', title, members }),
+    ),
   // 会话与消息：列表、历史、发送。历史接口的 after 参数就是断线补齐的入口。
   conversations: () => req<{ conversations: Conversation[] }>('/api/conversations'),
   messages: (id: number, after = 0) =>

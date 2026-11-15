@@ -34,16 +34,40 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 
+-- 社群：隔离与治理的边界。一套部署服务多个社群，同一个人可以在多个社群
+-- 拥有不同身份，但账号只有一个（users 表不重复）。
+CREATE TABLE IF NOT EXISTS communities (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  name        TEXT    NOT NULL,
+  description TEXT    NOT NULL DEFAULT '',
+  created_at  INTEGER NOT NULL
+);
+
+-- 谁在哪个社群里、是什么角色。owner/admin/member 是社群级角色，
+-- 与会话内角色（members 表）是两套正交的主体，互不推导。
+CREATE TABLE IF NOT EXISTS community_members (
+  community_id INTEGER NOT NULL REFERENCES communities(id) ON DELETE CASCADE,
+  user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role         TEXT    NOT NULL DEFAULT 'member' CHECK (role IN ('owner','admin','member')),
+  joined_at    INTEGER NOT NULL,
+  PRIMARY KEY (community_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_community_members_user ON community_members(user_id);
+
 -- 会话本身。next_seq 是序号水位：取号就是
 -- UPDATE next_seq = next_seq + 1 ... RETURNING，且与消息行同事务。
 CREATE TABLE IF NOT EXISTS conversations (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  kind       TEXT    NOT NULL CHECK (kind IN ('dm','group')),
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  community_id INTEGER NOT NULL DEFAULT 1 REFERENCES communities(id),
+  kind         TEXT    NOT NULL CHECK (kind IN ('dm','group')),
   title      TEXT    NOT NULL DEFAULT '',
   owner_id   INTEGER NOT NULL DEFAULT 0,
   next_seq   INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL
 );
+
+-- 会话按社群取列表时走的索引：维度在前，顺序在后。
+CREATE INDEX IF NOT EXISTS idx_conversations_community ON conversations(community_id, id);
 
 -- 谁在哪个会话里、是什么角色、被禁言到什么时候。
 -- 这一张表就是「会话内角色」这套权力的全部来源；

@@ -74,6 +74,12 @@ func (s *Server) Router() http.Handler {
 		r.Post("/api/upload", s.handleUpload)
 		r.Get("/files/{name}", s.handleFile)
 		r.Get("/api/users", s.handleUsers)
+		// 社群是隔离边界：列表与建会话都从路径上的社群出发，
+		// 而不是从客户端传来的任何 id 出发。
+		r.Post("/api/communities", s.handleCreateCommunity)
+		r.Get("/api/communities", s.handleCommunities)
+		r.Get("/api/communities/{id}/conversations", s.handleCommunityConversations)
+		r.Post("/api/communities/{id}/conversations", s.handleCreateCommunityConversation)
 		r.Get("/api/conversations", s.handleConversations)
 		// 会话与成员相关的路由集中在这几行；凡是落到某个具体会话的，
 		// 都会再查一次会话内角色（owner / admin / member）。
@@ -264,6 +270,10 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "bad_id", "conversation id must be a positive integer")
 		return
 	}
+	// 先过存在性这道门：跨社群的会话一律当作不存在。
+	if !s.conversationVisible(w, r, cid, u.ID) {
+		return
+	}
 	if _, err := s.DB.RoleOf(r.Context(), cid, u.ID); err != nil {
 		writeErr(w, 403, "not_a_member", "you are not in this conversation")
 		return
@@ -418,6 +428,10 @@ func (s *Server) handleReads(w http.ResponseWriter, r *http.Request) {
 	cid, ok := s.conversationID(r)
 	if !ok {
 		writeErr(w, 400, "bad_id", "conversation id must be a positive integer")
+		return
+	}
+	// 先过存在性这道门：跨社群的会话一律当作不存在。
+	if !s.conversationVisible(w, r, cid, u.ID) {
 		return
 	}
 	if _, err := s.DB.RoleOf(r.Context(), cid, u.ID); err != nil {

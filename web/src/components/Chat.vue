@@ -3,11 +3,13 @@
 // 协议部分（连接、重发、补齐、已读）属前端 A；
 // 模板与样式属前端 B。主线见 docs/READING.md。
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { api, uuid, type Conversation, type Me, type Message } from '../api'
+import { api, uuid, type Community, type Conversation, type Me, type Message } from '../api'
 
 const props = defineProps<{ me: Me }>()
 const emit = defineEmits<{ (e: 'logout'): void }>()
 
+const communities = ref<Community[]>([])
+const activeCommunity = ref(0)
 const conversations = ref<Conversation[]>([])
 const activeId = ref(0)
 const messages = ref<Message[]>([])
@@ -356,14 +358,33 @@ async function openCreate() {
   showCreate.value = true
 }
 
+// 会话列表只属于当前社群：切社群时整份换掉，不做合并。
+async function loadConversations() {
+  if (!activeCommunity.value) {
+    conversations.value = []
+    return
+  }
+  const res = await api.communityConversations(activeCommunity.value)
+  conversations.value = res.conversations
+}
+
+// 换社群：先清空选中与消息，再换列表——否则上一个社群的消息会挂在新会话下面。
+async function onCommunityChange() {
+  activeId.value = 0
+  messages.value = []
+  members.value = []
+  await loadConversations()
+  if (conversations.value.length) await select(conversations.value[0].id)
+}
+
 // 建群：没填标题就给个默认的，然后把人一次加进去。
 async function createGroup() {
   const title = newTitle.value.trim() || '新群聊'
   try {
-    const c = await api.createGroup(title, picked.value)
+    const c = await api.createCommunityGroup(activeCommunity.value, title, picked.value)
     // 成功后三步：关弹窗、重拉列表、切到新群。
     showCreate.value = false
-    conversations.value = (await api.conversations()).conversations
+    await loadConversations()
     await select(c.id)
   } catch (e) {
     gapNotice.value = '创建失败：' + (e as Error).message
@@ -382,7 +403,7 @@ async function removeMember(uid: number) {
   if (!activeId.value) return
   await api.removeMember(activeId.value, uid)
   await loadMembers()
-  conversations.value = (await api.conversations()).conversations
+  await loadConversations()
 }
 
 function openAdmin() {
@@ -405,12 +426,20 @@ async function logout() {
   emit('logout')
 }
 
-// 进页面第一件事：拉会话列表，再连上第一条会话。
+// 进页面第一件事：先拉社群，再拉该社群的会话，最后连上第一条。
 onMounted(async () => {
-  const res = await api.conversations()
-  conversations.value = res.conversations
+  try {
+    communities.value = (await api.communities()).communities
+  } catch (e) {
+    gapNotice.value = (e as Error).message
+  }
+  if (communities.value.length) {
+    activeCommunity.value = communities.value[0].id
+    await loadConversations()
+  }
+  // 连接与社群无关：先把长连接建起来，再决定选中哪个会话。
   connect()
-  if (res.conversations.length) await select(res.conversations[0].id)
+  if (conversations.value.length) await select(conversations.value[0].id)
   // 统计数字两秒刷一次：它是运维视角，不需要实时。
   statsTimer = window.setInterval(refreshStats, 2000)
   refreshStats()
@@ -437,6 +466,13 @@ watch(activeId, () => (gapNotice.value = ''))
         <span class="dot" :class="status" />
         <strong>imchat</strong>
         <span class="who">{{ me.display_name }}</span>
+      </div>
+
+      <!-- 社群切换器：会话列表属于当前社群，换社群等于换一份列表。 -->
+      <div class="comm">
+        <select v-model.number="activeCommunity" @change="onCommunityChange">
+          <option v-for="c in communities" :key="c.id" :value="c.id">{{ c.name }}</option>
+        </select>
       </div>
 
       <!-- 连接状态点：offline / connecting / online，由回调维护。 -->

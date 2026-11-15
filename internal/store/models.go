@@ -14,7 +14,8 @@ type User struct {
 // Conversation is a chat row. NextSeq is the sequence high-water mark the write
 // path increments; nothing else is allowed to touch it.
 type Conversation struct {
-	ID        int64
+	ID          int64
+	CommunityID int64
 	Kind      string
 	Title     string
 	OwnerID   int64

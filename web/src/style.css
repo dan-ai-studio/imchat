@@ -41,7 +41,7 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 button.primary:hover { background: #5f89ff; }
 button.ghost { background: transparent; }
 
-input, textarea {
+input, textarea, select {
   font: inherit;
   color: var(--text);
   background: var(--panel);
@@ -51,7 +51,11 @@ input, textarea {
   outline: none;
   width: 100%;
 }
-input:focus, textarea:focus { border-color: var(--accent); }
+input:focus, textarea:focus, select:focus { border-color: var(--accent); }
+
+/* 社群切换器：侧栏顶部独占一行，换它等于换一份会话列表。 */
+.comm { padding: 0 12px 10px; }
+.comm select { cursor: pointer; }
 
 .center {
   height: 100%;

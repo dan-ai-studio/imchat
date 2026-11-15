@@ -84,7 +84,11 @@ func (s *Server) handleMembers(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "bad_id", "conversation id must be a positive integer")
 		return
 	}
-	// 非成员连列表都不该看到：成员身份是这一站的第一个门。
+	// 先过存在性这道门：跨社群的会话一律当作不存在。
+	if !s.conversationVisible(w, r, cid, u.ID) {
+		return
+	}
+	// 非成员连列表都不该看到：成员身份是这一站的第二个门。
 	if _, err := s.DB.RoleOf(r.Context(), cid, u.ID); err != nil {
 		writeErr(w, 403, "not_a_member", "you are not in this conversation")
 		return

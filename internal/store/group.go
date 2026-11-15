@@ -20,12 +20,19 @@ type Member struct {
 // CreateGroup creates a group conversation and its membership in one
 // transaction: a conversation without an owner is not a valid state.
 func (d *DB) CreateGroup(ctx context.Context, ownerID int64, title string, memberIDs []int64) (*Conversation, error) {
+	// 旧调用方没有社群概念：一律落进默认社群。
+	return d.CreateGroupIn(ctx, DefaultCommunityID, ownerID, title, memberIDs)
+}
+
+// CreateGroupIn creates a group conversation inside one community, together
+// with its membership. The community is fixed at creation and never changes.
+func (d *DB) CreateGroupIn(ctx context.Context, communityID, ownerID int64, title string, memberIDs []int64) (*Conversation, error) {
 	// 会话行与 owner 成员行必须同一个事务：没有群主的群不是有效状态。
-	c := &Conversation{Kind: "group", Title: title, OwnerID: ownerID, CreatedAt: time.Now().UnixMilli()}
+	c := &Conversation{CommunityID: communityID, Kind: "group", Title: title, OwnerID: ownerID, CreatedAt: time.Now().UnixMilli()}
 	err := d.Write(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx,
-			"INSERT INTO conversations (kind, title, owner_id, next_seq, created_at) VALUES ('group', ?, ?, 0, ?)",
-			title, ownerID, c.CreatedAt)
+			"INSERT INTO conversations (community_id, kind, title, owner_id, next_seq, created_at) VALUES (?, 'group', ?, ?, 0, ?)",
+			communityID, title, ownerID, c.CreatedAt)
 		if err != nil {
 			return err
 		}

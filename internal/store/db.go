@@ -13,7 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const SchemaVersion = 3
+const SchemaVersion = 4
 
 //go:embed schema.sql
 var schemaFS embed.FS
@@ -26,6 +26,15 @@ var upgrades = map[int][]string{
 	2: {
 		"CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(body, conv UNINDEXED, seq UNINDEXED, tokenize='unicode61')",
 		"INSERT INTO messages_fts (body, conv, seq) SELECT body, conversation_id, seq FROM messages",
+	},
+	// 3 → 4：把「一个实例一个世界」改成「一个实例多个社群」。
+	// 旧数据全部落进默认社群（id=1），所以升级后行为不变。
+	3: {
+		"CREATE TABLE IF NOT EXISTS communities (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL)",
+		"CREATE TABLE IF NOT EXISTS community_members (community_id INTEGER NOT NULL REFERENCES communities(id) ON DELETE CASCADE, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('owner','admin','member')), joined_at INTEGER NOT NULL, PRIMARY KEY (community_id, user_id))",
+		"CREATE INDEX IF NOT EXISTS idx_community_members_user ON community_members(user_id)",
+		"ALTER TABLE conversations ADD COLUMN community_id INTEGER NOT NULL DEFAULT 1",
+		"CREATE INDEX IF NOT EXISTS idx_conversations_community ON conversations(community_id, id)",
 	},
 }
 
@@ -203,6 +212,18 @@ func (d *DB) Migrate(ctx context.Context) error {
 					return err
 				}
 			}
+		}
+		// 默认社群是旧数据与演示数据的落点。新建与升级都必须有它，
+		// 否则历史会话会挂在一个不存在的社群上。
+		now := time.Now().UnixMilli()
+		if _, err := tx.ExecContext(ctx,
+			"INSERT OR IGNORE INTO communities (id, name, description, created_at) VALUES (1, '默认社群', '', ?)", now); err != nil {
+			return err
+		}
+		// 还没有社群归属的账号全部进默认社群；平台管理员在其中担任管理员。
+		if _, err := tx.ExecContext(ctx,
+			"INSERT OR IGNORE INTO community_members (community_id, user_id, role, joined_at) SELECT 1, id, CASE WHEN is_admin = 1 THEN 'admin' ELSE 'member' END, ? FROM users", now); err != nil {
+			return err
 		}
 		_, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", SchemaVersion))
 		return err
