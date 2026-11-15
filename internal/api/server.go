@@ -39,6 +39,8 @@ type Server struct {
 	// Media owns the room peer connections. Nil means "this instance has no
 	// media": the RTC endpoints then answer 503 instead of pretending.
 	Media *media.Manager
+	// Limiter is the per-user send budget. Nil disables the check.
+	Limiter *sendLimiter
 }
 
 // ctxKey is a private type for request-context keys, so no other package can
@@ -420,6 +422,16 @@ func (s *Server) SendMessage(ctx context.Context, userID, convID int64, clientMs
 	})
 	if err != nil {
 		return nil, err
+	}
+	// 发言频率按等级给预算：等级越高，每分钟能说的话越多。
+	if s.Limiter != nil {
+		lv, _ := s.DB.LevelOf(ctx, userID)
+		if lv == nil {
+			lv = &store.Level{Level: 1}
+		}
+		if !s.Limiter.allow(userID, lv.Level*5) {
+			return nil, errors.New("你说话太快了，稍后再试")
+		}
 	}
 	// 发言给经验：ref 用消息 id，重投不会重复加分。
 	_ = s.DB.AddExp(ctx, userID, "message", msg.ID, 1)

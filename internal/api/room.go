@@ -42,7 +42,8 @@ func (s *Server) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 	u := userFrom(r.Context())
 	// 标题可以为空：空标题会被补成默认名，不值得为此拒绝一次开房。
 	var req struct {
-		Title string `json:"title"`
+		Title    string `json:"title"`
+		MinLevel int    `json:"min_level"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad_json", "body is not valid json")
@@ -52,10 +53,21 @@ func (s *Server) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 	if req.Title == "" {
 		req.Title = "新房间"
 	}
+	// 门槛可以为 0：不设门槛的房间任何人都能进。
+	if req.MinLevel < 0 {
+		req.MinLevel = 0
+	}
 	room, err := s.DB.CreateRoomIn(r.Context(), c.ID, u.ID, req.Title)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "create_failed", err.Error())
 		return
+	}
+	// 门槛在开房时一并落库，之后可以改。
+	if req.MinLevel > 0 {
+		if err := s.DB.SetRoomMinLevel(r.Context(), room.ID, u.ID, req.MinLevel); err != nil {
+			writeErr(w, http.StatusInternalServerError, "gate_failed", err.Error())
+			return
+		}
 	}
 	// 房主自动在场：开完房就应该能看到自己这间房。
 	if err := s.DB.EnterRoom(r.Context(), room.ID, u.ID); err != nil {
@@ -80,9 +92,12 @@ func (s *Server) handleRooms(w http.ResponseWriter, r *http.Request) {
 	out := make([]map[string]any, 0, len(list))
 	for _, room := range list {
 		occupants, _ := s.DB.RoomOccupants(r.Context(), room.ID)
+		// 门槛一起给出去：前端要在房间卡片上标「需要 Lv.N」。
+		minLevel, _ := s.DB.RoomGate(r.Context(), room.ID, 0)
 		out = append(out, map[string]any{
 			"id": room.ID, "kind": room.Kind, "title": room.Title,
 			"owner_id": room.OwnerID, "online": len(occupants), "next_seq": room.NextSeq,
+			"min_level": minLevel,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"rooms": out})
@@ -95,6 +110,20 @@ func (s *Server) handleEnterRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := userFrom(r.Context())
+	// 门槛只是等级比较：低于它进不来，达到就能进，不涉及任何管理动作。
+	minLevel, err := s.DB.RoomGate(r.Context(), room.ID, u.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "gate_failed", err.Error())
+		return
+	}
+	// 门槛为 0 表示不设限，连等级都不必查。
+	if minLevel > 0 {
+		lv, _ := s.DB.LevelOf(r.Context(), u.ID)
+		if lv == nil || lv.Level < minLevel {
+			writeErr(w, http.StatusForbidden, "level_too_low", "这间房需要更高的等级")
+			return
+		}
+	}
 	if err := s.DB.EnterRoom(r.Context(), room.ID, u.ID); err != nil {
 		writeErr(w, http.StatusInternalServerError, "enter_failed", err.Error())
 		return

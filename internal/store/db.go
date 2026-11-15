@@ -13,7 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const SchemaVersion = 9
+const SchemaVersion = 10
 
 //go:embed schema.sql
 var schemaFS embed.FS
@@ -63,6 +63,10 @@ var upgrades = map[int][]string{
 	8: {
 		"CREATE TABLE IF NOT EXISTS user_levels (user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, level INTEGER NOT NULL DEFAULT 1, exp INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)",
 		"CREATE TABLE IF NOT EXISTS exp_events (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, kind TEXT NOT NULL, ref TEXT NOT NULL, exp INTEGER NOT NULL, created_at INTEGER NOT NULL, UNIQUE (user_id, kind, ref))",
+	},
+	// 9 → 10：房间的进入门槛。等级只给门槛与展示，不给任何管理动作。
+	9: {
+		"ALTER TABLE conversations ADD COLUMN min_level INTEGER NOT NULL DEFAULT 0",
 	},
 }
 

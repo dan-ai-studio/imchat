@@ -139,6 +139,8 @@ func main() {
 	srvAPI.Media = api.NewMediaManager(func(userID int64, payload []byte) error {
 		return b.Publish(fmt.Sprintf("user.%d", userID), payload)
 	})
+	// 发言限流是内存的：重启丢预算是可以接受的，它只防滥用。
+	srvAPI.Limiter = api.NewSendLimiter()
 	disp := delivery.New(db, b)
 	srvAPI.Dispatcher = disp
 	// 投递器在后台每 100 毫秒扫一次到期记录。它的命挂在 ctx 上，剪断就停。

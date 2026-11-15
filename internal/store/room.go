@@ -115,6 +115,41 @@ func (d *DB) CloseRoom(ctx context.Context, roomID, ownerID int64) error {
 	})
 }
 
+// RoomGate reports whether a user may enter a room. The gate is a level
+// threshold, nothing else: it never grants or removes any管理权.
+func (d *DB) RoomGate(ctx context.Context, roomID, userID int64) (int, error) {
+	var minLevel int
+	if err := d.rdb.QueryRowContext(ctx,
+		"SELECT min_level FROM conversations WHERE id = ? AND is_room = 1", roomID).Scan(&minLevel); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, ErrNotFound
+		}
+		return 0, err
+	}
+	return minLevel, nil
+}
+
+// SetRoomMinLevel changes the entry threshold of one room.
+func (d *DB) SetRoomMinLevel(ctx context.Context, roomID, ownerID int64, minLevel int) error {
+	return d.Write(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		// 只有房主能改门槛：这是房间级动作，不是社群级治理。
+		res, err := tx.ExecContext(ctx,
+			"UPDATE conversations SET min_level = ? WHERE id = ? AND owner_id = ? AND is_room = 1", minLevel, roomID, ownerID)
+		if err != nil {
+			return err
+		}
+		// 影响行数为 0 有两种可能：不是房间，或者不是房主。两者回同一个错误。
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return ErrNotRoom
+		}
+		return nil
+	})
+}
+
 // RoomsOf lists the open rooms of one community, newest first.
 func (d *DB) RoomsOf(ctx context.Context, communityID int64) ([]*Conversation, error) {
 	rows, err := d.rdb.QueryContext(ctx,

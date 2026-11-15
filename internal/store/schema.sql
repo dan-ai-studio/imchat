@@ -121,6 +121,8 @@ CREATE TABLE IF NOT EXISTS conversations (
   is_room      INTEGER NOT NULL DEFAULT 0,
   -- 房间关闭时间：0 表示还开着。关闭不删消息，只是不再出现在房间里。
   closed_at    INTEGER NOT NULL DEFAULT 0,
+  -- 进入门槛：低于这个等级进不来。0 表示不设门槛。
+  min_level    INTEGER NOT NULL DEFAULT 0,
   title      TEXT    NOT NULL DEFAULT '',
   owner_id   INTEGER NOT NULL DEFAULT 0,
   next_seq   INTEGER NOT NULL DEFAULT 0,
