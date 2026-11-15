@@ -2,10 +2,12 @@
 
 一个**不依赖任何外部服务**的即时通信系统：一个可执行文件、一个 SQLite 文件、一个浏览器标签页。
 
+```bash
+./imchat                                       # 本地：自动建库、建管理员、打印密码、打开浏览器
+sudo ./imchat -domain im.example.com           # 公网：自己向 Let's Encrypt 申请证书，自带 HTTPS
 ```
-./imchat
-# open http://127.0.0.1:8080  →  alice / bob, password123
-```
+
+不需要反向代理，不需要数据库，不需要运行时。
 
 它要回答的不是"怎么画一个聊天框"，而是：
 
@@ -58,11 +60,18 @@
 ```bash
 # 需要 Go 1.24+
 go build -o bin/imchat.exe ./cmd/imchat
-./bin/imchat.exe                      # 默认 127.0.0.1:8080，数据在 ./data/imchat.db
+./bin/imchat.exe
 ```
 
-首次启动会种下演示数据：`alice` / `bob`，密码都是 `password123`，以及一个两人会话。
-开两个浏览器（或一个普通窗口 + 一个隐身窗口）分别登录即可互发消息。
+首次启动会创建一个 `admin` 账号，密码随机生成、**只打印一次**，浏览器自动打开：
+
+```
+  │ first-run account (shown once):  │
+  │   user  admin                    │
+  │   pass  mdXTgpEJVMUHNh           │
+```
+
+要演示双人对话，加 `-seed` 会额外建 `alice` / `bob`（密码 `password123`）和一个两人会话。
 
 ## 功能
 
@@ -132,10 +141,10 @@ node scripts/e2e.mjs
 
 ## 压测
 
-@@BT@@@@BT@@@@BT@@bash
+```bash
 go build -o bin/loadtest.exe ./cmd/loadtest
 ./bin/loadtest.exe -base http://127.0.0.1:18095 -workers 16 -per 50
-@@BT@@@@BT@@@@BT@@
+```
 
 一次本机实测（Windows，SQLite 单写者，含 bcrypt session 校验）：
 
@@ -168,19 +177,17 @@ GLOSSARY.md          领域词汇表（先读这个）
 
 ## 部署
 
-完整步骤（交叉编译、systemd、Caddy/Nginx、防火墙、备份、升级、排障）见
-[docs/DEPLOY.md](docs/DEPLOY.md)。最短路径是三步：
+三种模式：
 
-@@BT@@@@BT@@@@BT@@bash
-make release                                        # 交叉编译出 linux/amd64 等产物
-scp bin/imchat-linux-amd64 root@server:/opt/imchat/imchat
-ssh root@server '/opt/imchat/imchat -db /opt/imchat/data/imchat.db -create-user admin -password "强密码" -admin'
-@@BT@@@@BT@@@@BT@@
+| 场景 | 命令 |
+|---|---|
+| 本地 / 内网 | `./imchat` —— 自动建库、建管理员、打印密码、开浏览器 |
+| 公网 | `sudo ./imchat -domain im.example.com` —— 自己申请证书，自带 HTTPS |
+| 已有反代 | `./imchat` + 反代 `127.0.0.1:8080` |
 
-然后套上 [deploy/imchat.service](deploy/imchat.service) 和
-[deploy/Caddyfile](deploy/Caddyfile)，HTTPS 与 WebSocket 都由 Caddy 处理。
+详细步骤（systemd、备份、升级、排障、Docker、Windows）见 [docs/DEPLOY.md](docs/DEPLOY.md)。
 
-生产环境记得 `-seed=false`，并且用 `-backup` 做在线备份——**不要直接 `cp` 那个 .db 文件**。
+备份用 `-backup`，**不要直接 `cp` 那个 .db 文件**——WAL 模式下拷出来的快照可能不一致。
 
 ## 设计决策
 
