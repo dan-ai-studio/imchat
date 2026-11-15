@@ -173,11 +173,26 @@ func (s *Server) Router() http.Handler {
 // handleHealth answers "is this instance alive, and what is it made of" in one
 // object, without touching the session machinery.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	stats, _ := s.DB.OutboxStats(r.Context())
+	// 健康检查必须反映依赖状态，而不是永远回 200：
+	// 数据库读不出来就是 unhealthy，其余字段照常给出，方便一眼看出是哪一层坏了。
+	stats, err := s.DB.OutboxStats(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"ok": false, "error": "database unreachable", "schema": store.SchemaVersion,
+		})
+		return
+	}
+	// 数据库读得出来就算健康；媒体是可选依赖，没配就是 disabled。
+	mediaState := "disabled"
+	if s.Media != nil {
+		mediaState = "ok"
+	}
+	// 一次给出四组数：依赖状态、投递深度、连接数、schema 版本。
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":       true,
 		"bus":      "nats-inprocess",
 		"delivery": "at-least-once",
+		"media":    mediaState,
 		"schema":   store.SchemaVersion,
 		"outbox":   stats,
 		"ws_conns": s.Hub.Connections(),

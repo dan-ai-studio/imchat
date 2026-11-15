@@ -52,6 +52,7 @@ func main() {
 	seed := flag.Bool("seed", false, "create demo users alice/bob; local demos and tests only")
 	// 下面这几个是一次性运维命令：给完就退出，不进入服务状态。
 	backupTo := flag.String("backup", "", "write a consistent snapshot to this path, then exit")
+	backupDir := flag.String("backup-dir", "backups", "daily snapshot directory; empty disables the scheduler")
 	createUser := flag.String("create-user", "", "create this account, then exit")
 	password := flag.String("password", "", "password for -create-user")
 	admin := flag.Bool("admin", false, "grant platform admin to -create-user")
@@ -145,6 +146,8 @@ func main() {
 	srvAPI.Dispatcher = disp
 	// 投递器在后台每 100 毫秒扫一次到期记录。它的命挂在 ctx 上，剪断就停。
 	go disp.Run(ctx)
+	// 每日备份：启动先做一次，之后每 24 小时一次，保留最近七份。
+	go dailyBackup(ctx, db, *backupDir)
 
 	// Bootstrap: an empty database gets one admin account with a generated
 	// password, printed once. Demo accounts are opt-in via -seed.
