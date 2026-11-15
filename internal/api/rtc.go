@@ -59,6 +59,7 @@ func (s *Server) handleRTRenegotiate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad_json", "body is not valid json")
 		return
 	}
+	// 连接已经不在了（关标签页、被踢）：409 而不是 500，客户端可以重进房间。
 	answer, err := s.Media.Room(room.ID).Renegotiate(u.ID, webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: req.SDP})
 	if err != nil {
 		writeErr(w, http.StatusConflict, "renegotiate_failed", err.Error())
