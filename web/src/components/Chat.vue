@@ -1,4 +1,7 @@
 <script setup lang="ts">
+// ── 阅读导览 · 前端 A 与 B 都住在这份文件里 ──────────────
+// 协议部分（连接、重发、补齐、已读）属前端 A；
+// 模板与样式属前端 B。主线见 docs/READING.md。
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api, uuid, type Conversation, type Me, type Message } from '../api'
 
@@ -8,23 +11,28 @@ const emit = defineEmits<{ (e: 'logout'): void }>()
 const conversations = ref<Conversation[]>([])
 const activeId = ref(0)
 const messages = ref<Message[]>([])
+// 草稿与连接状态是这一屏的两块活数据；下面还有缺口提示与统计数字。
 const draft = ref('')
 const status = ref<'offline' | 'connecting' | 'online'>('offline')
 const gapNotice = ref('')
 const stats = ref<Record<string, number>>({})
+// 消息列表的滚动容器：新消息进来要自动滚到底。
 const scroller = ref<HTMLElement | null>(null)
 
 const members = ref<Array<{ user_id: number; username: string; display_name: string; role: string; muted: boolean }>>([])
 const showMembers = ref(false)
 const showCreate = ref(false)
+// 建群用的标题输入，与消息草稿分开：它们是两件不同的事。
 const newTitle = ref('')
 const people = ref<Array<{ id: number; username: string; display_name: string }>>([])
 const picked = ref<number[]>([])
 
 let ws: WebSocket | null = null
+// 连接、重试、退出手动关闭标记都是模块级变量，不是响应式的：它们由事件驱动。
 let retry = 0
 let retryTimer: number | undefined
 let manualDown = false
+// 下面这几个 let 是「连接生命周期」的状态，只在事件回调里被改。
 let statsTimer: number | undefined
 
 const active = computed(() => conversations.value.find((c) => c.id === activeId.value))
@@ -41,32 +49,39 @@ const statusText = computed(() =>
 const recalledSeqs = computed(
   () =>
     new Set(
+      // 先挑出所有墓碑，再把它们指向的序号收成集合。
       messages.value
         .filter((m) => m.kind === 'recall' && (m.recall_of ?? 0) > 0)
         .map((m) => m.recall_of as number),
     ),
 )
 
+// 合并去重的落点：按 (会话, 序号) 判重，与后端的去重口径一致。
 function merge(list: Message[]) {
   const merged = [...messages.value]
   for (const m of list) {
     if (!merged.some((x) => x.conversation_id === m.conversation_id && x.seq === m.seq)) merged.push(m)
   }
+  // 排一次序：本地刚发的那条 seq 可能比别人推来的小。
   merged.sort((a, b) => a.seq - b.seq)
   messages.value = merged
 }
 
 async function scrollToEnd() {
   await nextTick()
+  // 等 Vue 渲染完新节点再滚，否则滚到的是旧的底部。
   const el = scroller.value
   if (el) el.scrollTop = el.scrollHeight
 }
 
+// 补缺口：带上自己的最大序号去问，服务端只回比它大的那些。
 async function fillGap(fromSeq: number) {
   if (!activeId.value) return
   try {
+    // 只问比 fromSeq 大的：服务端按 seq > after 过滤，回的就是缺的那段。
     const res = await api.messages(activeId.value, fromSeq)
     const missing = res.messages.filter((m) => m.seq > fromSeq)
+    // 有缺口才提示；补完之后四秒，提示自己消失。
     if (missing.length) {
       merge(missing)
       gapNotice.value =
@@ -85,6 +100,7 @@ function ack(conversationId: number, seq: number) {
   }
 }
 
+// 收到一帧：先解析、再按 type 分派。解析失败就丢，坏帧不该影响连接。
 function onFrame(raw: MessageEvent) {
   let f: any
   try {
@@ -92,31 +108,37 @@ function onFrame(raw: MessageEvent) {
   } catch {
     return
   }
+  // 连上之后第一帧是 ready，从那以后才开始认别的帧。
   if (f.type === 'ready') {
     status.value = 'online'
     retry = 0
     return
   }
   if (f.type === 'read') {
+    // 已读位点只能前进：取较大值，防止一条乱序帧把它拉回去。
     reads.value[f.user_id] = Math.max(reads.value[f.user_id] ?? 0, f.seq)
     return
   }
   if (f.type !== 'msg') return
 
   if (f.conversation_id !== activeId.value) {
+    // 不是当前会话：只更新它的水位并立刻 ack，不往当前列表里塞。
     const c = conversations.value.find((x) => x.id === f.conversation_id)
     if (c && f.seq > c.next_seq) c.next_seq = f.seq
     ack(f.conversation_id, f.seq)
     return
   }
+  // 重投会带来重复帧：序号不比最后一条大就直接认掉，不重复入列。
   const prev = messages.value[messages.value.length - 1]
   if (prev && f.seq <= prev.seq) {
     ack(f.conversation_id, f.seq)
     return
   }
+  // 中间断了就先补；补完再入列，保证列表里不出现空洞。
   if (prev && f.seq > prev.seq + 1) fillGap(prev.seq)
   merge([f as Message])
   ack(f.conversation_id, f.seq)
+  // 收尾两步：滚到底、把已读位点报上去。
   scrollToEnd()
   sendRead()
 }
@@ -124,6 +146,7 @@ function onFrame(raw: MessageEvent) {
 function connect() {
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
   status.value = 'connecting'
+  // https 页面必须用 wss，否则浏览器会直接拒绝这条连接。
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
   ws = new WebSocket(proto + '//' + location.host + '/ws')
 
@@ -131,12 +154,14 @@ function connect() {
     status.value = 'online'
     retry = 0
     flushLocal()
+    // 连上之后补两件事：补齐缺失的消息、重报一次已读。
     if (activeId.value) {
       fillGap(lastSeq.value)
       sendRead()
     }
   }
   ws.onmessage = onFrame
+  // 断线自动重连：指数退避，最多五档；主动退出时不再重连。
   ws.onclose = () => {
     status.value = 'offline'
     ws = null
@@ -147,10 +172,12 @@ function connect() {
   ws.onerror = () => {}
 }
 
+// 演示按钮：主动断开并保持断开，好让人看清补齐过程。
 function simulateDrop() {
   manualDown = true
   ws?.close()
   gapNotice.value = '已断开。让对面发几条消息，重连后会自动补齐。'
+  // 六秒后自己接回去：够对面发几条消息，也够看清提示。
   window.setTimeout(() => {
     manualDown = false
     gapNotice.value = '正在重连…'
@@ -158,6 +185,7 @@ function simulateDrop() {
   }, 6000)
 }
 
+// 成员表给「群设置」用：角色、禁言状态都从这一份来。
 async function loadMembers() {
   if (!activeId.value) return
   try {
@@ -167,10 +195,12 @@ async function loadMembers() {
   }
 }
 
+// 切会话：清空消息与提示、收起成员面板，再重新拉历史与已读。
 async function select(id: number) {
   activeId.value = id
   messages.value = []
   gapNotice.value = ''
+  // 切过去先拉全量历史（after = 0），再滚到底。
   showMembers.value = false
   try {
     const res = await api.messages(id, 0)
@@ -179,6 +209,7 @@ async function select(id: number) {
   } catch (e) {
     gapNotice.value = (e as Error).message
   }
+  // 成员与已读各拉一次；已读转成 userId → seq 的映射，模板里直接用。
   await loadMembers()
   try {
     const rs = await api.reads(id)
@@ -189,23 +220,28 @@ async function select(id: number) {
   sendRead()
 }
 
+// 发送：先清草稿、生成 client_msg_id，再走「先上屏、后确认」那条路。
 async function send() {
   const body = draft.value.trim()
   if (!body || !activeId.value) return
   draft.value = ''
   const clientMsgId = uuid()
+  // 先插一条 seq = -1 的本地消息：界面上立刻能看到，等回执再替换。
   merge([
     {
       conversation_id: activeId.value,
       seq: -1,
       id: 'local-' + clientMsgId,
       client_msg_id: clientMsgId,
+      // 本地这条的字段要和真消息一致，回执到达时才能原地替换。
       sender_id: props.me.id,
       kind: 'text',
       body,
+      // seq 用负数：它比任何真实序号都小，用来标记「还没被服务端确认」。
       created_at: Date.now(),
     },
   ])
+  // 立刻滚到底，让人看见自己刚发的那条。
   await scrollToEnd()
   try {
     await api.send(activeId.value, body, clientMsgId)
@@ -215,6 +251,7 @@ async function send() {
   }
 }
 
+// 撤回：先请求服务端，再等广播回来的帧更新列表——本地不抢先改。
 async function recallMessage(m: Message) {
   if (m.seq <= 0) return
   try {
@@ -224,6 +261,7 @@ async function recallMessage(m: Message) {
   }
 }
 
+// 设备号只存在本地：同一个账号在两台机器上就是两份已读位点。
 const deviceId = (() => {
   const key = 'imchat.device'
   let d = localStorage.getItem(key)
@@ -234,6 +272,7 @@ const deviceId = (() => {
   return d
 })()
 
+// 已读表：userId → 最大序号。peerRead 取别人的最大值，用来显示「已读至」。
 const reads = ref<Record<number, number>>({})
 const peerRead = computed(() => {
   let max = 0
@@ -251,8 +290,10 @@ async function flushLocal() {
   if (!localQueue.value.length) return
   const queued = [...localQueue.value]
   localQueue.value = []
+  // 一条条重发；每条都带原来的 client_msg_id，所以重复到达也无害。
   for (const item of queued) {
     try {
+      // 失败的那条会在 catch 里放回队列，等下一次重连再试。
       await api.send(item.convId, item.body, item.clientMsgId, item.kind)
     } catch {
       localQueue.value.push(item)
@@ -260,6 +301,7 @@ async function flushLocal() {
   }
 }
 
+// 已读上报：一个用户一份位点；设备号只用来区分这份位点是从哪台机器报上去的。
 function sendRead() {
   if (!ws || ws.readyState !== WebSocket.OPEN || !activeId.value) return
   const seq = lastSeq.value
@@ -267,6 +309,7 @@ function sendRead() {
   ws.send(JSON.stringify({ type: 'read', conversation_id: activeId.value, seq, device: deviceId }))
 }
 
+// 选文件用一个隐藏的 input，点按钮时代它点一下。
 const fileInput = ref<HTMLInputElement | null>(null)
 
 function pickFile() {
@@ -274,11 +317,13 @@ function pickFile() {
 }
 
 async function onFile(e: Event) {
+  // 取完立刻清空 input，同一个文件才能被再选一次。
   const input = e.target as HTMLInputElement
   const f = input.files?.[0]
   input.value = ''
   if (!f || !activeId.value) return
   try {
+    // 先上传拿文件名，再发一条 kind=image 的消息；两步都成功才算发出去了。
     const up = await api.upload(f)
     await api.send(activeId.value, up.id, uuid(), 'image')
   } catch (err) {
@@ -290,6 +335,7 @@ async function onFile(e: Event) {
 function mentionsMe(m: Message): boolean {
   if (!m.meta) return false
   try {
+    // meta 是服务端解析 @ 后写进去的；这里只读，不改。
     const parsed = JSON.parse(m.meta)
     return Array.isArray(parsed.mentions) && parsed.mentions.includes(props.me.id)
   } catch {
@@ -297,7 +343,9 @@ function mentionsMe(m: Message): boolean {
   }
 }
 
+// 建群弹窗：先清空已选，再拉一次可选的人（排除自己）。
 async function openCreate() {
+  // 拉全站用户再排除自己：建群时不该把自己列进候选。
   picked.value = []
   newTitle.value = ''
   try {
@@ -308,10 +356,12 @@ async function openCreate() {
   showCreate.value = true
 }
 
+// 建群：没填标题就给个默认的，然后把人一次加进去。
 async function createGroup() {
   const title = newTitle.value.trim() || '新群聊'
   try {
     const c = await api.createGroup(title, picked.value)
+    // 成功后三步：关弹窗、重拉列表、切到新群。
     showCreate.value = false
     conversations.value = (await api.conversations()).conversations
     await select(c.id)
@@ -320,12 +370,14 @@ async function createGroup() {
   }
 }
 
+// 禁言与解除走同一个接口：minutes = 0 就是解除。
 async function mute(uid: number, minutes: number) {
   if (!activeId.value) return
   await api.muteMember(activeId.value, uid, minutes)
   await loadMembers()
 }
 
+// 移出成员：写完重拉成员表，再重拉会话列表——成员数变了。
 async function removeMember(uid: number) {
   if (!activeId.value) return
   await api.removeMember(activeId.value, uid)
@@ -337,6 +389,7 @@ function openAdmin() {
   location.hash = '#/admin'
 }
 
+// 统计两秒一拉：它是运维窗口，不影响消息收发。
 async function refreshStats() {
   try {
     stats.value = (await api.stats()).outbox
@@ -352,27 +405,33 @@ async function logout() {
   emit('logout')
 }
 
+// 进页面第一件事：拉会话列表，再连上第一条会话。
 onMounted(async () => {
   const res = await api.conversations()
   conversations.value = res.conversations
   connect()
   if (res.conversations.length) await select(res.conversations[0].id)
+  // 统计数字两秒刷一次：它是运维视角，不需要实时。
   statsTimer = window.setInterval(refreshStats, 2000)
   refreshStats()
 })
 
 onBeforeUnmount(() => {
   manualDown = true
+  // 卸载时把定时器和连接都收掉，否则热更新会叠出旧连接。
   clearTimeout(retryTimer)
   clearInterval(statsTimer)
   ws?.close()
 })
 
+// 切会话时把上一条缺口提示清掉：它只对那个会话有意义。
 watch(activeId, () => (gapNotice.value = ''))
 </script>
 
+<!-- Chat 模板三栏：左侧会话列表、中间消息流、底部输入框。 -->
 <template>
   <div class="shell">
+    <!-- 左栏：会话列表。每一项显示标题与最后一条的序号。 -->
     <aside class="sidebar">
       <div class="brand">
         <span class="dot" :class="status" />
@@ -380,7 +439,9 @@ watch(activeId, () => (gapNotice.value = ''))
         <span class="who">{{ me.display_name }}</span>
       </div>
 
+      <!-- 连接状态点：offline / connecting / online，由回调维护。 -->
       <div class="list">
+        <!-- 每个会话一行：类型、标题、序号水位。 -->
         <button
           v-for="c in conversations"
           :key="c.id"
@@ -388,6 +449,7 @@ watch(activeId, () => (gapNotice.value = ''))
           :class="{ on: c.id === activeId }"
           @click="select(c.id)"
         >
+          <!-- 三个 span：类型徽标、标题、序号水位。 -->
           <span class="kind">{{ c.kind === 'group' ? '群' : '私' }}</span>
           <span class="name">{{ c.title || '会话 #' + c.id }}</span>
           <span class="meta">{{ c.next_seq }}</span>
@@ -395,18 +457,21 @@ watch(activeId, () => (gapNotice.value = ''))
         <button class="newgroup" @click="openCreate">+ 新建群聊</button>
       </div>
 
+      <!-- 底部状态条：连接状态与待投递队列深度。 -->
       <div class="foot">
         <div class="stat">连接 <b>{{ statusText }}</b></div>
         <div class="stat">
           待投递
           <b>{{ Object.entries(stats).map(([k, v]) => k + ':' + v).join(' ') || '—' }}</b>
         </div>
+        <!-- 三个按钮：模拟断网（演示补齐）、管理台（仅管理员）、退出。 -->
         <button class="ghost" @click="simulateDrop">模拟断网</button>
         <button v-if="me.is_admin" class="ghost" @click="openAdmin">管理台</button>
         <button class="ghost" @click="logout">退出</button>
       </div>
     </aside>
 
+    <!-- 主区：会话标题栏、消息流、输入框。 -->
     <main class="main">
       <header>
         <h2>{{ active ? active.title || '会话 #' + active.id : '未选择会话' }}</h2>
@@ -416,14 +481,17 @@ watch(activeId, () => (gapNotice.value = ''))
         <span class="seq">last seq {{ lastSeq }} · 对方已读至 {{ peerRead }}</span>
       </header>
 
+      <!-- 消息流：每条一行；撤回的消息渲染成一行系统提示。 -->
       <div ref="scroller" class="stream">
         <template v-for="m in messages" :key="m.conversation_id + ':' + m.seq">
           <div v-if="m.kind === 'recall'" class="sys">撤回了一条消息</div>
+          <!-- 非撤回消息：一条气泡，自己发的靠右。 -->
           <div v-else class="row" :class="{ mine: m.sender_id === me.id }">
             <div
               class="bubble"
               :class="{ pending: m.seq < 0, revoked: recalledSeqs.has(m.seq), mentioned: mentionsMe(m) }"
             >
+              <!-- 图片消息：正文就是上传返回的文件名，路径由 /files/ 拼出来。 -->
               <img
                 v-if="!recalledSeqs.has(m.seq) && m.kind === 'image'"
                 class="pic"
@@ -431,23 +499,28 @@ watch(activeId, () => (gapNotice.value = ''))
                 alt="图片消息"
               />
               <div v-else class="body">{{ recalledSeqs.has(m.seq) ? '该消息已撤回' : m.body }}</div>
+              <!-- 底部一行：时间与操作；撤回只对自己发的消息显示。 -->
               <div class="meta">
+                <!-- 撤回按钮只在自己发的、已确认、且未撤回的消息上出现。 -->
                 <span
                   v-if="m.sender_id === me.id && m.seq > 0 && !recalledSeqs.has(m.seq)"
                   class="act"
                   @click="recallMessage(m)"
                   >撤回</span
                 >
+                <!-- 序号跟在后面：排查时一眼能对上服务端的记录。 -->
                 #{{ m.seq }}
               </div>
             </div>
           </div>
         </template>
+        <!-- 空态：一句提示，不画占位骨架。 -->
         <p v-if="!messages.length" class="empty">还没有消息。</p>
       </div>
 
       <p v-if="gapNotice" class="notice">{{ gapNotice }}</p>
 
+      <!-- 输入区：图片按钮、文本框、发送按钮。 -->
       <footer>
         <input ref="fileInput" class="file" type="file" accept="image/*" @change="onFile" />
         <button class="ghost" title="发送图片" @click="pickFile">图片</button>
@@ -456,36 +529,43 @@ watch(activeId, () => (gapNotice.value = ''))
           placeholder="输入消息，回车发送。用 @用户名 提醒对方"
           @keydown.enter.prevent="send"
         />
+        <!-- 没输入时按钮不可点：空消息发不出去，也就没机会报错。 -->
         <button class="primary" :disabled="!draft.trim()" @click="send">发送</button>
       </footer>
     </main>
 
+    <!-- 成员抽屉：只在群聊且点了「成员」时出现。 -->
     <aside v-if="showMembers && isGroup" class="drawer">
       <div class="drawer-head">
         <strong>成员</strong>
         <button class="ghost small" @click="showMembers = false">关闭</button>
       </div>
+      <!-- 成员列表：名字、角色徽标、禁言标记；有治理权的人还多一行操作。 -->
       <ul>
         <li v-for="m in members" :key="m.user_id">
           <div class="ml">
             <b>{{ m.display_name }}</b>
             <span class="role" :class="m.role">{{ m.role }}</span>
+            <!-- 禁言中的成员多一个标记；解除之后这一行就消失。 -->
             <span v-if="m.muted" class="muted-flag">禁言中</span>
           </div>
           <div v-if="canGovern && m.user_id !== me.id" class="mops">
             <button class="tiny" @click="mute(m.user_id, m.muted ? 0 : 30)">
               {{ m.muted ? '解除' : '禁言30分' }}
             </button>
+            <!-- 群主不能被移出，所以他对这一列按钮不可见。 -->
             <button v-if="m.role !== 'owner'" class="tiny" @click="removeMember(m.user_id)">移出</button>
           </div>
         </li>
       </ul>
     </aside>
 
+    <!-- 建群弹窗：标题输入 + 成员勾选。 -->
     <div v-if="showCreate" class="modal">
       <div class="sheet">
         <h3>新建群聊</h3>
         <input v-model="newTitle" placeholder="群名称" />
+        <!-- 成员勾选：候选来自 /api/users，已经排除自己。 -->
         <ul class="picks">
           <li v-for="p in people" :key="p.id">
             <label>
@@ -494,8 +574,10 @@ watch(activeId, () => (gapNotice.value = ''))
             </label>
           </li>
         </ul>
+        <!-- 底部两个按钮：取消只关弹窗，创建会真的建群并切过去。 -->
         <div class="row-actions">
           <button class="ghost" @click="showCreate = false">取消</button>
+          <!-- 创建：走 /api/conversations，成功后关弹窗并切到新群。 -->
           <button class="primary" @click="createGroup">创建</button>
         </div>
       </div>
@@ -510,38 +592,47 @@ watch(activeId, () => (gapNotice.value = ''))
 .brand { display: flex; align-items: center; gap: 8px; padding: 16px; border-bottom: 1px solid var(--line); }
 .brand strong { letter-spacing: -.02em; }
 .who { margin-left: auto; color: var(--muted); font-size: 12px; }
+/* 连接状态点：灰=未知、绿=在线、黄=连接中、红=离线。 */
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .dot.online { background: var(--ok); box-shadow: 0 0 0 3px rgba(53,192,138,.15); }
 .dot.connecting { background: var(--warn); }
 .dot.offline { background: var(--bad); }
 
+/* 会话列表：可滚动，列表项之间留 4px 缝。 */
 .list { flex: 1; overflow-y: auto; padding: 8px; display: grid; gap: 4px; align-content: start; }
+/* 会话项：整行可点，选中态用浅蓝底。 */
 .conv {
   display: flex; align-items: center; gap: 8px; text-align: left;
   background: transparent; border-color: transparent; padding: 10px 12px; border-radius: 10px;
 }
 .conv:hover { background: var(--panel-2); }
 .conv.on { background: var(--accent-soft); border-color: #2b3a63; }
+/* 类型徽标：群 / 私。 */
 .kind { font-size: 10px; color: var(--muted); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; }
 .conv .name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .conv .meta { margin-left: auto; color: var(--muted); font-size: 11px; }
 .newgroup { background: transparent; border: 1px dashed var(--line); color: var(--muted); margin-top: 4px; }
 
+/* 侧栏底部：连接状态、待投递数字，三个按钮。 */
 .foot { padding: 12px; border-top: 1px solid var(--line); display: grid; gap: 8px; }
 .stat { font-size: 12px; color: var(--muted); display: flex; gap: 6px; }
 .stat b { color: var(--text); font-weight: 500; }
 
+/* 主区：标题栏固定、消息流占满、输入区固定在底部。 */
 .main { display: flex; flex-direction: column; min-width: 0; }
 .main header { display: flex; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
 .main header h2 { margin: 0; font-size: 15px; font-weight: 600; }
 .seq { margin-left: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .small { padding: 4px 10px; font-size: 12px; }
 
+/* 消息流：竖向弹性布局，新消息在底部。 */
 .stream { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
 .row { display: flex; }
 .row.mine { justify-content: flex-end; }
+/* 气泡：最宽 560px 或 72%，自己发的换配色。 */
 .bubble { max-width: min(560px, 72%); background: var(--panel-2); border: 1px solid var(--line); border-radius: 14px; padding: 9px 13px; }
 .row.mine .bubble { background: var(--accent); border-color: var(--accent); color: #fff; }
+/* 三种气泡状态：待确认（半透明）、已撤回（斜体）、被 @（金色描边）。 */
 .bubble.pending { opacity: .55; }
 .bubble.revoked { opacity: .5; font-style: italic; }
 .bubble.mentioned { box-shadow: 0 0 0 2px #d9a441; }
@@ -549,22 +640,28 @@ watch(activeId, () => (gapNotice.value = ''))
 .file { display: none; }
 .bubble .body { white-space: pre-wrap; word-break: break-word; }
 .bubble .meta { font-size: 10px; opacity: .6; margin-top: 3px; text-align: right; font-variant-numeric: tabular-nums; }
+/* 撤回的系统提示：居中灰字，与正常消息区分开。 */
 .sys { text-align: center; color: var(--muted); font-size: 12px; padding: 2px 0; }
 .act { cursor: pointer; margin-right: 8px; text-decoration: underline; opacity: .75; }
 .act:hover { opacity: 1; }
 .empty { color: var(--muted); text-align: center; margin-top: 40px; }
 
+/* 缺口提示条：出现在消息流上方，四秒后消失。 */
 .notice { margin: 0; padding: 9px 20px; font-size: 12px; background: var(--accent-soft); color: #b9c8ff; border-top: 1px solid #2b3a63; }
 
+/* 输入区：一条输入框加发送按钮。 */
 .main footer { display: flex; gap: 10px; padding: 14px 20px; border-top: 1px solid var(--line); background: var(--panel); }
 .main footer input { flex: 1; }
 
+/* 成员抽屉：右栏 240px，头固定、列表可滚动。 */
 .drawer { width: 240px; border-left: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; }
 .drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+/* 抽屉成员列表：可滚动。 */
 .drawer ul { list-style: none; margin: 0; padding: 8px; overflow-y: auto; display: grid; gap: 4px; }
 .drawer li { padding: 8px 10px; border-radius: 9px; display: grid; gap: 6px; }
 .drawer li:hover { background: var(--panel-2); }
 .ml { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+/* 角色徽标：owner 金色、admin 绿色、member 灰色。 */
 .role { font-size: 10px; color: var(--muted); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; }
 .role.owner { color: #ffd479; border-color: #5a4a20; }
 .role.admin { color: #9bd07a; border-color: #2f4526; }
@@ -572,7 +669,9 @@ watch(activeId, () => (gapNotice.value = ''))
 .mops { display: flex; gap: 6px; }
 .tiny { padding: 3px 8px; font-size: 11px; }
 
+/* 建群弹窗：整页遮罩 + 居中卡片。 */
 .modal { position: fixed; inset: 0; background: rgba(6,8,12,.66); display: grid; place-items: center; padding: 24px; }
+/* 弹窗卡片：固定 360px 宽，内容竖向排。 */
 .sheet { width: 360px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 22px; display: grid; gap: 14px; }
 .sheet h3 { margin: 0; font-size: 16px; }
 .picks { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow-y: auto; display: grid; gap: 6px; }
