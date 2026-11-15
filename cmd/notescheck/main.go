@@ -209,6 +209,12 @@ func checkGo(path string, src []byte) ([]violation, error) {
 		}
 	}
 
+	// 测试文件只检查声明注释：arrange/act/assert 的结构本身就是讲解，
+	// 再要求每八行一句，会把「把断言写清楚」挤成「凑注释」。
+	if strings.HasSuffix(path, "_test.go") {
+		return out, nil
+	}
+
 	// 规则二：函数体内不得出现连续超过 maxRun 行无讲解的代码。
 	lines := strings.Split(string(src), "\n")
 	commented := commentLines(fset, f)

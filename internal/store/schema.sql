@@ -54,6 +54,26 @@ CREATE TABLE IF NOT EXISTS community_members (
 );
 CREATE INDEX IF NOT EXISTS idx_community_members_user ON community_members(user_id);
 
+-- 等级：全站统一的成长刻度。只给特权与展示，不产生任何管理权。
+CREATE TABLE IF NOT EXISTS user_levels (
+  user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  level      INTEGER NOT NULL DEFAULT 1,
+  exp        INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL
+);
+
+-- 经验事件：每一分经验都有出处。唯一键 (user_id, kind, ref) 让重复上报幂等，
+-- 所以同一条消息不会因为重投而被加两次分。
+CREATE TABLE IF NOT EXISTS exp_events (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind       TEXT    NOT NULL,
+  ref        TEXT    NOT NULL,
+  exp        INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  UNIQUE (user_id, kind, ref)
+);
+
 -- 审计：谁在什么时候对哪个对象做了什么。越权尝试也写进来，
 -- 因为「谁试过」和「谁做成了」同样重要。
 CREATE TABLE IF NOT EXISTS audit_log (

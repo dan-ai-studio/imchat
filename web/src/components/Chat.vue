@@ -34,6 +34,8 @@ const rooms = ref<Array<{ id: number; title: string; owner_id: number; online: n
 const newRoomTitle = ref('')
 // 麦位面板：只在房间里出现，展示谁在麦上、谁举手。
 const seats = ref<Array<{ user_id: number; display_name: string; position: number; state: string }>>([])
+// 自己的等级：侧栏展示用，不参与任何权限判断。
+const myLevel = ref<{ level: number; exp: number; next_at: number } | null>(null)
 const joinRequests = ref<Array<{ id: number; user_id: number; username: string; display_name: string }>>([])
 // 建群用的标题输入，与消息草稿分开：它们是两件不同的事。
 const newTitle = ref('')
@@ -468,6 +470,15 @@ async function enableVideo() {
   }
 }
 
+// 拉自己的等级：进页面与每次发言后刷新一次。
+async function loadLevel() {
+  try {
+    myLevel.value = await api.level(me.id)
+  } catch {
+    myLevel.value = null
+  }
+}
+
 // 拉麦位列表：进房与每次操作后都要刷新。
 async function loadSeats() {
   if (!activeId.value) return
@@ -627,6 +638,8 @@ onMounted(async () => {
   // 连接与社群无关：先把长连接建起来，再决定选中哪个会话。
   connect()
   if (conversations.value.length) await select(conversations.value[0].id)
+  // 等级是展示值，进页面拉一次就够。
+  await loadLevel()
   // 统计数字两秒刷一次：它是运维视角，不需要实时。
   statsTimer = window.setInterval(refreshStats, 2000)
   refreshStats()
@@ -652,7 +665,7 @@ watch(activeId, () => (gapNotice.value = ''))
       <div class="brand">
         <span class="dot" :class="status" />
         <strong>imchat</strong>
-        <span class="who">{{ me.display_name }}</span>
+        <span class="who">{{ me.display_name }}<template v-if="myLevel"> · Lv.{{ myLevel.level }}</template></span>
       </div>
 
       <!-- 社群切换器：会话列表属于当前社群，换社群等于换一份列表。 -->

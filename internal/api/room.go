@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -99,6 +100,9 @@ func (s *Server) handleEnterRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 回执里带当前人数：前端进场后不用再拉一次。
+	// 进房算一次在场经验：同一小时只记一次，避免挂机刷分。
+	hour := time.Now().UTC().Format("2006-01-02T15")
+	_ = s.DB.AddExp(r.Context(), u.ID, "presence", hour, 2)
 	occupants, _ := s.DB.RoomOccupants(r.Context(), room.ID)
 	writeJSON(w, http.StatusOK, map[string]any{"id": room.ID, "online": len(occupants)})
 }

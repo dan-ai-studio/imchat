@@ -13,7 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const SchemaVersion = 8
+const SchemaVersion = 9
 
 //go:embed schema.sql
 var schemaFS embed.FS
@@ -58,6 +58,11 @@ var upgrades = map[int][]string{
 	7: {
 		"CREATE TABLE IF NOT EXISTS room_seats (conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, position INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL CHECK (state IN ('invited','requested','on_mic')), updated_at INTEGER NOT NULL, PRIMARY KEY (conversation_id, user_id))",
 		"CREATE INDEX IF NOT EXISTS idx_seats_state ON room_seats(conversation_id, state)",
+	},
+	// 8 → 9：等级与经验事件。经验必须可追溯，所以每一分都落一行。
+	8: {
+		"CREATE TABLE IF NOT EXISTS user_levels (user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, level INTEGER NOT NULL DEFAULT 1, exp INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)",
+		"CREATE TABLE IF NOT EXISTS exp_events (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, kind TEXT NOT NULL, ref TEXT NOT NULL, exp INTEGER NOT NULL, created_at INTEGER NOT NULL, UNIQUE (user_id, kind, ref))",
 	},
 }
 

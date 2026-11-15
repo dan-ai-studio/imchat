@@ -126,6 +126,9 @@ export const api = {
   rtcAnswer: (roomId: number, sdp: string) =>
     req<{ ok: boolean }>('/api/rooms/' + roomId + '/rtc/answer', json({ sdp })),
   rtcLeave: (roomId: number) => req<{ ok: boolean }>('/api/rooms/' + roomId + '/rtc/leave', { method: 'POST' }),
+  // 等级：只读展示值，不参与任何权限判断。
+  level: (uid: number) =>
+    req<{ user_id: number; level: number; exp: number; next_at: number }>('/api/levels/' + uid),
   // 麦位：举手、上麦、下麦。麦位是资源，不是权限。
   seats: (roomId: number) =>
     req<{ seats: Array<{ user_id: number; display_name: string; position: number; state: string }>; max: number }>(

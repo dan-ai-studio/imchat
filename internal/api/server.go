@@ -128,6 +128,9 @@ func (s *Server) Router() http.Handler {
 		r.Get("/api/conversations/{id}/reads", s.handleReads)
 		r.Post("/api/conversations/{id}/send", s.handleSend)
 		r.Post("/api/conversations/{id}/recall", s.handleRecall)
+		// 等级：只读展示值，不参与任何权限判断。
+		r.Get("/api/levels/{uid}", s.handleLevel)
+		r.Get("/api/levels", s.handleLevels)
 		r.Get("/api/stats", s.handleStats)
 		r.Get("/ws", s.handleWS)
 
@@ -418,6 +421,8 @@ func (s *Server) SendMessage(ctx context.Context, userID, convID int64, clientMs
 	if err != nil {
 		return nil, err
 	}
+	// 发言给经验：ref 用消息 id，重投不会重复加分。
+	_ = s.DB.AddExp(ctx, userID, "message", msg.ID, 1)
 	// 房间消息不经过投递器：写成功后直接推给此刻在场的人。
 	if conv.IsRoom {
 		s.broadcastToRoom(ctx, convID, msg)
