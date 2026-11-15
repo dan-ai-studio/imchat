@@ -71,7 +71,7 @@ func main() {
 		log.Fatalf("create files dir: %v", err)
 	}
 
-	srvAPI := &api.Server{DB: db, Auth: am, Hub: hub, FilesDir: filesDir}
+	srvAPI := &api.Server{DB: db, Auth: am, Hub: hub, FilesDir: filesDir, Bus: b}
 	disp := delivery.New(db, b)
 	srvAPI.Dispatcher = disp
 	go disp.Run(ctx)

@@ -2,7 +2,7 @@ APP := imchat
 BIN := bin/imchat.exe
 LDFLAGS := -s -w
 
-.PHONY: build run tidy lint test verify e2e clean
+.PHONY: build run tidy lint test verify e2e load clean
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/imchat
@@ -25,6 +25,10 @@ verify:
 e2e: build
 	@echo "start the server first: ./$(BIN) -addr 127.0.0.1:18081 -db ./data/e2e.db"
 	@node scripts/e2e.mjs
+
+load:
+	go build -o bin/loadtest.exe ./cmd/loadtest
+	./bin/loadtest.exe -base http://127.0.0.1:8080 -workers 16 -per 50
 
 clean:
 	rm -rf bin data web/dist

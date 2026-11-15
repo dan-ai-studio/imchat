@@ -97,6 +97,10 @@ function onFrame(raw: MessageEvent) {
     retry = 0
     return
   }
+  if (f.type === 'read') {
+    reads.value[f.user_id] = Math.max(reads.value[f.user_id] ?? 0, f.seq)
+    return
+  }
   if (f.type !== 'msg') return
 
   if (f.conversation_id !== activeId.value) {
@@ -114,6 +118,7 @@ function onFrame(raw: MessageEvent) {
   merge([f as Message])
   ack(f.conversation_id, f.seq)
   scrollToEnd()
+  sendRead()
 }
 
 function connect() {
@@ -125,7 +130,11 @@ function connect() {
   ws.onopen = () => {
     status.value = 'online'
     retry = 0
-    if (activeId.value) fillGap(lastSeq.value)
+    flushLocal()
+    if (activeId.value) {
+      fillGap(lastSeq.value)
+      sendRead()
+    }
   }
   ws.onmessage = onFrame
   ws.onclose = () => {
@@ -171,6 +180,13 @@ async function select(id: number) {
     gapNotice.value = (e as Error).message
   }
   await loadMembers()
+  try {
+    const rs = await api.reads(id)
+    reads.value = Object.fromEntries(rs.reads.map((r) => [r.user_id, r.seq]))
+  } catch {
+    reads.value = {}
+  }
+  sendRead()
 }
 
 async function send() {
@@ -194,7 +210,8 @@ async function send() {
   try {
     await api.send(activeId.value, body, clientMsgId)
   } catch (e) {
-    gapNotice.value = '发送失败：' + (e as Error).message
+    localQueue.value.push({ convId: activeId.value, body, clientMsgId, kind: 'text' })
+    gapNotice.value = '发送失败，已进入本地重试队列：' + (e as Error).message
   }
 }
 
@@ -205,6 +222,49 @@ async function recallMessage(m: Message) {
   } catch (e) {
     gapNotice.value = '撤回失败：' + (e as Error).message
   }
+}
+
+const deviceId = (() => {
+  const key = 'imchat.device'
+  let d = localStorage.getItem(key)
+  if (!d) {
+    d = uuid()
+    localStorage.setItem(key, d)
+  }
+  return d
+})()
+
+const reads = ref<Record<number, number>>({})
+const peerRead = computed(() => {
+  let max = 0
+  for (const [uid, seq] of Object.entries(reads.value)) {
+    if (Number(uid) !== props.me.id) max = Math.max(max, seq)
+  }
+  return max
+})
+
+// A failed send is not dropped: it waits here and replays on reconnect. Replay
+// is safe because the server dedupes on client_msg_id.
+const localQueue = ref<Array<{ convId: number; body: string; clientMsgId: string; kind: string }>>([])
+
+async function flushLocal() {
+  if (!localQueue.value.length) return
+  const queued = [...localQueue.value]
+  localQueue.value = []
+  for (const item of queued) {
+    try {
+      await api.send(item.convId, item.body, item.clientMsgId, item.kind)
+    } catch {
+      localQueue.value.push(item)
+    }
+  }
+}
+
+function sendRead() {
+  if (!ws || ws.readyState !== WebSocket.OPEN || !activeId.value) return
+  const seq = lastSeq.value
+  if (seq <= 0) return
+  ws.send(JSON.stringify({ type: 'read', conversation_id: activeId.value, seq, device: deviceId }))
 }
 
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -353,7 +413,7 @@ watch(activeId, () => (gapNotice.value = ''))
         <button v-if="isGroup" class="ghost small" @click="showMembers = !showMembers">
           成员 {{ members.length }}
         </button>
-        <span class="seq">last seq {{ lastSeq }}</span>
+        <span class="seq">last seq {{ lastSeq }} · 对方已读至 {{ peerRead }}</span>
       </header>
 
       <div ref="scroller" class="stream">

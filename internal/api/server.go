@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"imchat/internal/auth"
+	"imchat/internal/bus"
 	"imchat/internal/delivery"
 	"imchat/internal/store"
 	"imchat/internal/ws"
@@ -24,6 +26,9 @@ type Server struct {
 	Hub        *ws.Hub
 	Dispatcher *delivery.Dispatcher
 	FilesDir   string
+	// Bus carries ephemeral state (read cursors, presence) that must not be
+	// persisted: losing it is harmless, the next fetch restores it.
+	Bus *bus.Bus
 }
 
 type ctxKey string
@@ -61,6 +66,7 @@ func (s *Server) Router() http.Handler {
 		r.Delete("/api/conversations/{id}/members/{uid}", s.handleRemoveMember)
 		r.Post("/api/conversations/{id}/members/{uid}/mute", s.handleMuteMember)
 		r.Get("/api/conversations/{id}/messages", s.handleMessages)
+		r.Get("/api/conversations/{id}/reads", s.handleReads)
 		r.Post("/api/conversations/{id}/send", s.handleSend)
 		r.Post("/api/conversations/{id}/recall", s.handleRecall)
 		r.Get("/api/stats", s.handleStats)
@@ -316,6 +322,51 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, map[string]any{"id": m.ID, "seq": m.Seq, "conversation_id": m.ConversationID, "created_at": m.CreatedAt})
 }
 
+// broadcastRead fans a read cursor out to the other participants. It goes
+// straight onto the bus instead of the outbox because it is state, not history:
+// nothing breaks if this frame is lost.
+func (s *Server) broadcastRead(ctx context.Context, convID, userID, seq int64) {
+	if s.Bus == nil {
+		return
+	}
+	members, err := s.DB.Members(ctx, convID)
+	if err != nil {
+		return
+	}
+	payload := ws.Encode(map[string]any{
+		"type": "read", "conversation_id": convID, "user_id": userID, "seq": seq,
+	})
+	for _, m := range members {
+		if m == userID {
+			continue
+		}
+		_ = s.Bus.Publish(fmt.Sprintf("user.%d", m), payload)
+	}
+}
+
+func (s *Server) handleReads(w http.ResponseWriter, r *http.Request) {
+	u := userFrom(r.Context())
+	cid, ok := s.conversationID(r)
+	if !ok {
+		writeErr(w, 400, "bad_id", "conversation id must be a positive integer")
+		return
+	}
+	if _, err := s.DB.RoleOf(r.Context(), cid, u.ID); err != nil {
+		writeErr(w, 403, "not_a_member", "you are not in this conversation")
+		return
+	}
+	cursors, err := s.DB.ReadCursors(r.Context(), cid)
+	if err != nil {
+		writeErr(w, 500, "query_failed", err.Error())
+		return
+	}
+	out := make([]map[string]any, 0, len(cursors))
+	for _, c := range cursors {
+		out = append(out, map[string]any{"user_id": c.UserID, "seq": c.Seq})
+	}
+	writeJSON(w, 200, map[string]any{"reads": out})
+}
+
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	stats, _ := s.DB.OutboxStats(r.Context())
 	writeJSON(w, 200, map[string]any{"outbox": stats, "ws_conns": s.Hub.Connections()})
@@ -361,6 +412,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			_ = s.DB.AckOutbox(ctx, f.ConversationID, f.Seq, u.ID)
 		case "read":
 			_ = s.DB.SetReadCursor(ctx, f.ConversationID, u.ID, f.Device, f.Seq)
+			s.broadcastRead(ctx, f.ConversationID, u.ID, f.Seq)
 		}
 	})
 }

@@ -66,6 +66,8 @@ export const api = {
     req<{ ok: boolean }>('/api/conversations/' + id + '/members/' + uid + '/mute', json({ minutes })),
   removeMember: (id: number, uid: number) =>
     req<{ ok: boolean }>('/api/conversations/' + id + '/members/' + uid, { method: 'DELETE' }),
+  reads: (id: number) =>
+    req<{ reads: Array<{ user_id: number; seq: number }> }>('/api/conversations/' + id + '/reads'),
   conversations: () => req<{ conversations: Conversation[] }>('/api/conversations'),
   messages: (id: number, after = 0) =>
     req<{ messages: Message[] }>('/api/conversations/' + id + '/messages?after=' + after + '&limit=300'),

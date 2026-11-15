@@ -130,6 +130,27 @@ go build -o bin/imchat.exe ./cmd/imchat
 node scripts/e2e.mjs
 ```
 
+## 压测
+
+@@BT@@@@BT@@@@BT@@bash
+go build -o bin/loadtest.exe ./cmd/loadtest
+./bin/loadtest.exe -base http://127.0.0.1:18095 -workers 16 -per 50
+@@BT@@@@BT@@@@BT@@
+
+一次本机实测（Windows，SQLite 单写者，含 bcrypt session 校验）：
+
+| 指标 | 值 |
+|---|---|
+| 并发写入 | 16 |
+| 消息数 | 800 |
+| 失败 | 0 |
+| 吞吐 | 452 msg/s |
+| p50 / p95 / p99 | 34 / 48 / 55 ms |
+| 落库后序号密度 | 1000 条，first=1 last=1000，无空洞无重复 |
+
+这组数字不是"我们很快"的声明，而是"并发压上去，序号仍然稠密"的证据。
+单写者在这里不是瓶颈的辩解，而是这个性质的来源。
+
 ## 目录
 
 ```
