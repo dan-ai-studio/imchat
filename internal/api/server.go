@@ -1,5 +1,9 @@
 package api
 
+// ── 阅读导览 · 第 2 站（第 4 站也住在这一份文件里）────────
+// 上一站：站1 进程装配
+// 下一站：站3 帧协议
+
 import (
 	"context"
 	"encoding/json"
@@ -20,6 +24,8 @@ import (
 	"imchat/internal/ws"
 )
 
+// Server is the HTTP surface. It owns the router, the auth manager, the hub and
+// the dispatcher; main wires all four in, and this type only uses them.
 type Server struct {
 	DB         *store.DB
 	Auth       *auth.Manager
@@ -31,20 +37,28 @@ type Server struct {
 	Bus *bus.Bus
 }
 
+// ctxKey is a private type for request-context keys, so no other package can
+// collide with ours by accident.
 type ctxKey string
 
 const userKey ctxKey = "imchat.user"
 
+// writeJSON sets the content type before the status: headers freeze once the
+// body starts, and forgetting the type is the classic way to ship text/plain.
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// writeErr is the one error shape this API speaks: a machine code plus a
+// human sentence.
 func writeErr(w http.ResponseWriter, status int, code, msg string) {
 	writeJSON(w, status, map[string]string{"error": code, "message": msg})
 }
 
+// Router wires every route. Two groups: public (the auth endpoints) and
+// authenticated (everything else), with admin routes one level deeper.
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
 
@@ -53,6 +67,7 @@ func (s *Server) Router() http.Handler {
 	r.Post("/api/login", s.handleLogin)
 	r.Post("/api/logout", s.handleLogout)
 
+	// 公开路由：注册 / 登录 / 登出 / 健康检查，不需要会话。
 	r.Group(func(r chi.Router) {
 		r.Use(s.requireAuth)
 		r.Get("/api/me", s.handleMe)
@@ -60,11 +75,14 @@ func (s *Server) Router() http.Handler {
 		r.Get("/files/{name}", s.handleFile)
 		r.Get("/api/users", s.handleUsers)
 		r.Get("/api/conversations", s.handleConversations)
+		// 会话与成员相关的路由集中在这几行；凡是落到某个具体会话的，
+		// 都会再查一次会话内角色（owner / admin / member）。
 		r.Post("/api/conversations", s.handleCreateConversation)
 		r.Get("/api/conversations/{id}/members", s.handleMembers)
 		r.Post("/api/conversations/{id}/members", s.handleAddMember)
 		r.Delete("/api/conversations/{id}/members/{uid}", s.handleRemoveMember)
 		r.Post("/api/conversations/{id}/members/{uid}/mute", s.handleMuteMember)
+		// 下面几行是「会话里的动作」：消息回补、已读、发送、撤回。
 		r.Get("/api/conversations/{id}/messages", s.handleMessages)
 		r.Get("/api/conversations/{id}/reads", s.handleReads)
 		r.Post("/api/conversations/{id}/send", s.handleSend)
@@ -72,9 +90,13 @@ func (s *Server) Router() http.Handler {
 		r.Get("/api/stats", s.handleStats)
 		r.Get("/ws", s.handleWS)
 
+		// 管理台单独一层，并再套一次 requireAdmin：
+		// 平台管理员与会话内角色是两套正交的主体，权限不能互相推导。
 		r.Route("/api/admin", func(r chi.Router) {
 			r.Use(s.requireAdmin)
 			r.Get("/stats", s.handleAdminStats)
+			// 账号与连接：封禁会同时删掉会话并断开全部长连接，
+			// 所以对方的下一次请求就是未授权。
 			r.Get("/users", s.handleAdminUsers)
 			r.Post("/users/{id}/status", s.handleAdminUserStatus)
 			r.Post("/users/{id}/kick", s.handleAdminKick)
@@ -86,18 +108,21 @@ func (s *Server) Router() http.Handler {
 	return r
 }
 
+// handleHealth answers "is this instance alive, and what is it made of" in one
+// object, without touching the session machinery.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	stats, _ := s.DB.OutboxStats(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":         true,
-		"bus":        "nats-inprocess",
-		"delivery":   "at-least-once",
-		"schema":     store.SchemaVersion,
-		"outbox":     stats,
-		"ws_conns":   s.Hub.Connections(),
+		"ok":       true,
+		"bus":      "nats-inprocess",
+		"delivery": "at-least-once",
+		"schema":   store.SchemaVersion,
+		"outbox":   stats,
+		"ws_conns": s.Hub.Connections(),
 	})
 }
 
+// creds is the shared request body of register and login.
 type creds struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
@@ -106,12 +131,15 @@ type creds struct {
 
 const cookieName = "imchat_session"
 
+// handleRegister creates a normal account. It can never grant platform admin:
+// that only comes from the command line or the first-run bootstrap.
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	var c creds
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&c); err != nil {
 		writeErr(w, 400, "bad_json", "body is not valid json")
 		return
 	}
+	// 公开注册只能建普通账号：平台管理员不从这条路来。
 	u, err := s.Auth.Register(r.Context(), strings.TrimSpace(c.Username), c.Display, c.Password, false)
 	if err != nil {
 		writeErr(w, 400, "register_failed", err.Error())
@@ -120,6 +148,8 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, map[string]any{"id": u.ID, "username": u.Username, "display_name": u.DisplayName})
 }
 
+// handleLogin verifies the password and plants the session cookie: HttpOnly,
+// SameSite=Lax. The browser never hands the token to script.
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var c creds
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&c); err != nil {
@@ -131,6 +161,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 401, "login_failed", err.Error())
 		return
 	}
+	// 令牌放进 HttpOnly 的 cookie：脚本读不到它，XSS 就偷不走会话。
 	http.SetCookie(w, &http.Cookie{
 		Name:     cookieName,
 		Value:    token,
@@ -142,6 +173,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"id": u.ID, "username": u.Username, "display_name": u.DisplayName, "is_admin": u.IsAdmin})
 }
 
+// handleLogout deletes the server-side session and expires the cookie. Both
+// halves matter: expiring only the cookie would leave a live row behind.
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(cookieName); err == nil {
 		_ = s.Auth.Logout(r.Context(), c.Value)
@@ -150,6 +183,9 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
+// token finds the session token in the three places a client may put it: the
+// cookie (browsers), the Authorization header (scripts), and the query string
+// (websocket handshakes, where custom headers are impossible).
 func (s *Server) token(r *http.Request) string {
 	if c, err := r.Cookie(cookieName); err == nil && c.Value != "" {
 		return c.Value
@@ -165,6 +201,8 @@ func (s *Server) token(r *http.Request) string {
 	return ""
 }
 
+// requireAuth resolves the token once and puts the user on the request context.
+// Downstream handlers read it with userFrom and never touch the token again.
 func (s *Server) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		u, err := s.Auth.Resolve(r.Context(), s.token(r))
@@ -176,16 +214,20 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 	})
 }
 
+// userFrom returns the authenticated user or nil. Routes behind requireAuth may
+// assume non-nil; anything else must check.
 func userFrom(ctx context.Context) *store.User {
 	u, _ := ctx.Value(userKey).(*store.User)
 	return u
 }
 
+// handleMe echoes the identity behind the current cookie.
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	u := userFrom(r.Context())
 	writeJSON(w, 200, map[string]any{"id": u.ID, "username": u.Username, "display_name": u.DisplayName, "is_admin": u.IsAdmin})
 }
 
+// handleConversations lists the conversations this user belongs to.
 func (s *Server) handleConversations(w http.ResponseWriter, r *http.Request) {
 	u := userFrom(r.Context())
 	cs, err := s.DB.ConversationsOf(r.Context(), u.ID)
@@ -193,6 +235,7 @@ func (s *Server) handleConversations(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, "query_failed", err.Error())
 		return
 	}
+	// 只回列表需要的字段，加上会话的序号水位——前端靠它判断自己缺不缺消息。
 	out := make([]map[string]any, 0, len(cs))
 	for _, c := range cs {
 		out = append(out, map[string]any{
@@ -202,6 +245,8 @@ func (s *Server) handleConversations(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"conversations": out})
 }
 
+// conversationID parses the {id} path parameter and rejects anything that is
+// not a positive integer, so handlers never see a zero id.
 func (s *Server) conversationID(r *http.Request) (int64, bool) {
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil || id <= 0 {
@@ -210,6 +255,8 @@ func (s *Server) conversationID(r *http.Request) (int64, bool) {
 	return id, true
 }
 
+// handleMessages is the gap filler: everything after a given sequence number,
+// capped by limit. Membership is checked before a single row is read.
 func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	u := userFrom(r.Context())
 	cid, ok := s.conversationID(r)
@@ -221,6 +268,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 403, "not_a_member", "you are not in this conversation")
 		return
 	}
+	// 成员确认过了。下面两件事都很小：一个可选的起点，一个夹紧的上限。
 	var after int64
 	if v := r.URL.Query().Get("after"); v != "" {
 		after, _ = strconv.ParseInt(v, 10, 64)
@@ -231,11 +279,13 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
+	// after 缺省 0，limit 夹在 1..500：谁也不能一次把整个会话拖走。
 	msgs, err := s.DB.MessagesAfter(r.Context(), cid, after, limit)
 	if err != nil {
 		writeErr(w, 500, "query_failed", err.Error())
 		return
 	}
+	// 逐条摊平成 JSON。recall_of 也带上，客户端才知道哪条是墓碑、指向谁。
 	out := make([]map[string]any, 0, len(msgs))
 	for _, m := range msgs {
 		out = append(out, map[string]any{
@@ -247,6 +297,8 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"messages": out})
 }
 
+// sendReq is the HTTP body of a send. The websocket path carries the same
+// fields inside a frame instead.
 type sendReq struct {
 	ClientMsgID string `json:"client_msg_id"`
 	Kind        string `json:"kind"`
@@ -258,12 +310,17 @@ func (s *Server) SendMessage(ctx context.Context, userID, convID int64, clientMs
 	if _, err := s.DB.RoleOf(ctx, convID, userID); err != nil {
 		return nil, errors.New("not a member of this conversation")
 	}
+	// 没给类型就按文本处理。注意图片消息的 body 是文件名，不能按文本判空。
+	// 这里是全仓唯一写消息的地方。在别处再开一条写消息的路，会同时破坏三件事：
+	// 取号与待投递记录的同事务（序号可能因此出现空洞）、client_msg_id 的幂等去重、
+	// 以及 @ 提醒的解析。三件事都长在这一条函数里，绕开它等于绕开全部。
 	if kind == "" {
 		kind = "text"
 	}
 	if kind == "text" && strings.TrimSpace(body) == "" {
 		return nil, errors.New("empty message")
 	}
+	// 禁言是会话内的权力，不是平台级的：这里查的是会话内角色与到期时间。
 	if until, err := s.DB.MutedUntil(ctx, convID, userID); err == nil && until > time.Now().UnixMilli() {
 		return nil, errors.New("you are muted in this conversation")
 	}
@@ -271,9 +328,12 @@ func (s *Server) SendMessage(ctx context.Context, userID, convID int64, clientMs
 	if err != nil {
 		return nil, err
 	}
+	// 权限、内容、禁言都过了，下面只剩一件事：把消息连同它的投递义务一起写进去。
 	meta := "{}"
 	if kind == "text" {
 		if mlist, err := s.DB.MembersOf(ctx, convID); err == nil {
+			// 只在文本里找 @用户名 与 @显示名；命中的用户 id 收集起来，
+			// 写进消息的 meta，而不是给消息表加一个新字段。
 			mentioned := make([]int64, 0, 2)
 			for _, m := range mlist {
 				if m.UserID == userID {
@@ -283,6 +343,7 @@ func (s *Server) SendMessage(ctx context.Context, userID, convID int64, clientMs
 					mentioned = append(mentioned, m.UserID)
 				}
 			}
+			// 没人被 @ 就不动 meta：默认值 "{}" 已经是一个合法的空对象。
 			if len(mentioned) > 0 {
 				if b, err := json.Marshal(map[string]any{"mentions": mentioned}); err == nil {
 					meta = string(b)
@@ -291,6 +352,7 @@ func (s *Server) SendMessage(ctx context.Context, userID, convID int64, clientMs
 		}
 	}
 
+	// 真正落库的是 store 层：取号、消息行、待投递记录在同一个事务里完成。
 	return s.DB.SendMessage(ctx, store.SendParams{
 		ConversationID: convID,
 		SenderID:       userID,
@@ -302,6 +364,8 @@ func (s *Server) SendMessage(ctx context.Context, userID, convID int64, clientMs
 	})
 }
 
+// handleSend is the HTTP twin of the websocket send frame. Both funnel into
+// SendMessage, the only place a message is ever written.
 func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	u := userFrom(r.Context())
 	cid, ok := s.conversationID(r)
@@ -309,16 +373,19 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "bad_id", "conversation id must be a positive integer")
 		return
 	}
+	// 请求体限 64KB：一条消息不该把服务端撑爆。
 	var req sendReq
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
 		writeErr(w, 400, "bad_json", "body is not valid json")
 		return
 	}
+	// 与 websocket 那条路走同一个函数：唯一写路径不是口号，是两个入口收敛到一处。
 	m, err := s.SendMessage(r.Context(), u.ID, cid, req.ClientMsgID, req.Kind, req.Body)
 	if err != nil {
 		writeErr(w, 400, "send_failed", err.Error())
 		return
 	}
+	// 回执里给出 seq：客户端拿它立刻能对上界面上的消息，不必等推送回来。
 	writeJSON(w, 201, map[string]any{"id": m.ID, "seq": m.Seq, "conversation_id": m.ConversationID, "created_at": m.CreatedAt})
 }
 
@@ -333,6 +400,7 @@ func (s *Server) broadcastRead(ctx context.Context, convID, userID, seq int64) {
 	if err != nil {
 		return
 	}
+	// 已读位点是状态不是历史，所以走总线直发、不进 outbox：丢了下次拉取就回来。
 	payload := ws.Encode(map[string]any{
 		"type": "read", "conversation_id": convID, "user_id": userID, "seq": seq,
 	})
@@ -344,6 +412,7 @@ func (s *Server) broadcastRead(ctx context.Context, convID, userID, seq int64) {
 	}
 }
 
+// handleReads returns every participant's read cursor for one conversation.
 func (s *Server) handleReads(w http.ResponseWriter, r *http.Request) {
 	u := userFrom(r.Context())
 	cid, ok := s.conversationID(r)
@@ -355,11 +424,13 @@ func (s *Server) handleReads(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 403, "not_a_member", "you are not in this conversation")
 		return
 	}
+	// 位点按终端存、按用户取最大值——这就是「已读」在数据库里的真实形状。
 	cursors, err := s.DB.ReadCursors(r.Context(), cid)
 	if err != nil {
 		writeErr(w, 500, "query_failed", err.Error())
 		return
 	}
+	// 每个终端一个位点，这里原样给出；谁已读到哪里由调用方自己判断。
 	out := make([]map[string]any, 0, len(cursors))
 	for _, c := range cursors {
 		out = append(out, map[string]any{"user_id": c.UserID, "seq": c.Seq})
@@ -367,13 +438,22 @@ func (s *Server) handleReads(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"reads": out})
 }
 
+// handleStats is the cheap version of the health numbers: outbox depth and live
+// connection count.
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	stats, _ := s.DB.OutboxStats(r.Context())
 	writeJSON(w, 200, map[string]any{"outbox": stats, "ws_conns": s.Hub.Connections()})
 }
 
+// handleWS upgrades the request and then owns the connection for its lifetime:
+// one writer goroutine, one read loop, and the frame switch that is the whole
+// protocol. The user was already resolved by requireAuth — that is exactly why
+// this connection can trust its own identity.
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	u := userFrom(r.Context())
+	// 升级成 websocket。这里显式关掉了 Origin 校验：客户端可能是任何来源的非浏览器
+	// 程序，升级前也没有人给它发过令牌。浏览器一侧的防护由会话 cookie 的
+	// SameSite=Lax 承担——跨站的握手带不上这张 cookie，所以拿不到身份。
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
 		OriginPatterns:     []string{"*"},
@@ -381,6 +461,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+	// 连接对象记住用户 id：这条长连接从此不必再带令牌。
 	conn := ws.NewConn(c, u.ID, "")
 	s.Hub.Add(conn)
 	defer func() {
@@ -388,16 +469,19 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		conn.Close()
 	}()
 
+	// 一条连接一个可取消的 ctx：连接断开，写循环与读循环一起退出。
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
 	go conn.WriteLoop(ctx)
 	conn.Send(ws.Encode(map[string]any{"type": "ready", "user_id": u.ID}))
 
+	// 读循环里就是这个协议的全部：四个上行帧各做什么，见站3 的帧清单。
 	conn.ReadLoop(ctx, func(f ws.Frame) {
 		switch f.Type {
 		case "ping":
 			conn.Send(ws.Encode(map[string]any{"type": "pong"}))
+		// send 与 HTTP 那条路共用一个写函数；ack 是唯一改状态的帧。
 		case "send":
 			m, err := s.SendMessage(ctx, u.ID, f.ConversationID, f.ClientMsgID, f.Kind, f.Body)
 			if err != nil {
@@ -408,6 +492,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				"type": "sent", "client_msg_id": m.ClientMsgID,
 				"conversation_id": m.ConversationID, "seq": m.Seq, "id": m.ID,
 			}))
+		// ack 是整个协议里唯一改状态的帧：它让一条待投递记录消解。
 		case "ack":
 			_ = s.DB.AckOutbox(ctx, f.ConversationID, f.Seq, u.ID)
 		case "read":
