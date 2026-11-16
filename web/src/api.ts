@@ -126,6 +126,33 @@ export const api = {
   rtcAnswer: (roomId: number, sdp: string) =>
     req<{ ok: boolean }>('/api/rooms/' + roomId + '/rtc/answer', json({ sdp })),
   rtcLeave: (roomId: number) => req<{ ok: boolean }>('/api/rooms/' + roomId + '/rtc/leave', { method: 'POST' }),
+  // 举报：进社群队列，由社群管理员处置。
+  report: (communityId: number, targetKind: string, targetId: string, reason: string) =>
+    req<{ id: number; status: string }>(
+      '/api/communities/' + communityId + '/reports',
+      json({ target_kind: targetKind, target_id: targetId, reason }),
+    ),
+  // 队列只列待决的：已决的留在库里做审计，不占队列。
+  reports: (communityId: number) =>
+    req<{ reports: Array<{ id: number; reporter: string; target_kind: string; target_id: string; reason: string; created_at: number }> }>(
+      '/api/communities/' + communityId + '/reports',
+    ),
+  decideReport: (id: number, status: string, action: string, note: string) =>
+    req<{ ok: boolean }>('/api/reports/' + id + '/decide', json({ status, action, note })),
+  reportActions: (id: number) =>
+    req<{ actions: Array<{ action: string; note: string }> }>('/api/reports/' + id + '/actions'),
+  // 被处置者的一侧：查针对自己的举报，以及自己提过的申诉。
+  myReports: () =>
+    req<{ reports: Array<{ id: number; community_id: number; reason: string; status: string }> }>('/api/reports/mine'),
+  appeal: (reportId: number, reason: string) =>
+    req<{ id: number; status: string }>('/api/reports/' + reportId + '/appeals', json({ reason })),
+  myAppeals: () =>
+    req<{ appeals: Array<{ id: number; report_id: number; reason: string; status: string }> }>('/api/appeals/mine'),
+  // 平台申诉队列：只有平台管理员看得到。
+  appeals: () =>
+    req<{ appeals: Array<{ id: number; report_id: number; user: string; reason: string; created_at: number }> }>('/api/appeals'),
+  decideAppeal: (id: number, overturn: boolean, note: string) =>
+    req<{ ok: boolean }>('/api/appeals/' + id + '/decide', json({ overturn, note })),
   // 运营看板：平台管理员视角的聚合数字。
   dashboard: () =>
     req<{

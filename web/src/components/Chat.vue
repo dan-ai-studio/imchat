@@ -34,6 +34,107 @@ const rooms = ref<Array<{ id: number; title: string; owner_id: number; online: n
 const newRoomTitle = ref('')
 // 麦位面板：只在房间里出现，展示谁在麦上、谁举手。
 const seats = ref<Array<{ user_id: number; display_name: string; position: number; state: string }>>([])
+// 举报一条消息：任何成员都能报，理由可以不写。
+const showReport = ref(false)
+const reportTarget = ref<Message | null>(null)
+const reportReason = ref('')
+
+// 打开举报弹窗：记住目标，清掉上一次的理由。
+function openReport(m: Message) {
+  reportTarget.value = m
+  reportReason.value = ''
+  showReport.value = true
+}
+
+// 提交举报：进当前社群的队列，由社群管理员处置。
+async function submitReport() {
+  if (!reportTarget.value) return
+  try {
+    await api.report(activeCommunity.value, 'message', reportTarget.value.id, reportReason.value.trim())
+    showReport.value = false
+    gapNotice.value = '已提交举报'
+  } catch (e) {
+    gapNotice.value = '举报失败：' + (e as Error).message
+  }
+}
+
+// 社群举报队列：只有社群管理员拉得到。
+const showReports = ref(false)
+const pendingReports = ref<Array<{ id: number; reporter: string; target_kind: string; target_id: string; reason: string }>>([])
+
+// 打开队列：每次现拉，避免看到已经处置过的旧行。
+async function openReports() {
+  try {
+    pendingReports.value = (await api.reports(activeCommunity.value)).reports
+    showReports.value = true
+  } catch (e) {
+    gapNotice.value = (e as Error).message
+  }
+}
+
+// 处置一条举报：actioned 记删除消息，dismissed 记驳回。
+async function decideReport(id: number, status: string) {
+  try {
+    await api.decideReport(id, status, status === 'actioned' ? 'remove_message' : 'dismiss', '')
+    await openReports()
+  } catch (e) {
+    gapNotice.value = '处置失败：' + (e as Error).message
+  }
+}
+
+// 我的一侧：针对我的处置，以及我提过的申诉。
+const showMine = ref(false)
+const myReports = ref<Array<{ id: number; reason: string; status: string }>>([])
+const myAppeals = ref<Array<{ id: number; report_id: number; reason: string; status: string }>>([])
+const appealReason = ref('')
+
+// 打开我的一侧：被处置记录与申诉进度一起拉。
+async function openMine() {
+  try {
+    myReports.value = (await api.myReports()).reports
+    myAppeals.value = (await api.myAppeals()).appeals
+    showMine.value = true
+  } catch (e) {
+    gapNotice.value = (e as Error).message
+  }
+}
+
+// 提交申诉：挂在某条针对我的举报上，由平台裁决。
+async function submitAppeal(reportId: number) {
+  try {
+    await api.appeal(reportId, appealReason.value.trim())
+    appealReason.value = ''
+    await openMine()
+    gapNotice.value = '申诉已提交，等待平台裁决'
+  } catch (e) {
+    gapNotice.value = '申诉失败：' + (e as Error).message
+  }
+}
+
+// 平台申诉队列：只有平台管理员拉得到。
+const showAppeals = ref(false)
+const appeals = ref<Array<{ id: number; report_id: number; user: string; reason: string }>>([])
+
+// 打开平台队列。
+async function openAppeals() {
+  try {
+    appeals.value = (await api.appeals()).appeals
+    showAppeals.value = true
+  } catch (e) {
+    gapNotice.value = (e as Error).message
+  }
+}
+
+// 裁决一条申诉：维持或改判；改判会把举报改成驳回。
+async function decideAppeal(id: number, overturn: boolean) {
+  try {
+    await api.decideAppeal(id, overturn, overturn ? '改判' : '维持原判')
+    await openAppeals()
+  } catch (e) {
+    gapNotice.value = '裁决失败：' + (e as Error).message
+  }
+}
+
 // 运营看板：只有平台管理员能拉到；其他人这里保持 null。
 const board = ref<{ rooms: number; room_online: number; messages_24h: number; users: number; reports_open: number; appeals_open: number } | null>(null)
 // 自己的等级：侧栏展示用，不参与任何权限判断。
@@ -712,6 +813,11 @@ watch(activeId, () => (gapNotice.value = ''))
         <button class="newgroup" @click="showJoin = true">+ 加入社群</button>
         <!-- 房间是独立入口：它不在会话列表里，进场后才补进去。 -->
         <button class="newgroup" @click="openRooms">房间</button>
+        <!-- 举报队列只给社群管理员；我的处置与申诉所有人都有。 -->
+        <button v-if="isCommunityAdmin" class="newgroup" @click="openReports">举报队列</button>
+        <button class="newgroup" @click="openMine">我的处置</button>
+        <!-- 平台申诉队列只给平台管理员。 -->
+        <button v-if="me.is_admin" class="newgroup" @click="openAppeals">申诉队列</button>
       </div>
 
       <!-- 底部状态条：连接状态与待投递队列深度。 -->
@@ -767,6 +873,13 @@ watch(activeId, () => (gapNotice.value = ''))
                   class="act"
                   @click="recallMessage(m)"
                   >撤回</span
+                >
+                <!-- 举报只对别人的、已确认的消息显示：自己的消息不需要举报。 -->
+                <span
+                  v-if="m.sender_id !== me.id && m.seq > 0 && !recalledSeqs.has(m.seq)"
+                  class="act"
+                  @click="openReport(m)"
+                  >举报</span
                 >
                 <!-- 序号跟在后面：排查时一眼能对上服务端的记录。 -->
                 #{{ m.seq }}
@@ -881,6 +994,97 @@ watch(activeId, () => (gapNotice.value = ''))
         <div class="row-actions">
           <button class="ghost" @click="showRooms = false">关闭</button>
           <button class="primary" @click="createRoom">开房</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 举报弹窗：理由可以不写，写清楚更好处置。 -->
+    <div v-if="showReport" class="modal">
+      <div class="sheet">
+        <h3>举报消息</h3>
+        <p class="muted">{{ reportTarget?.body?.slice(0, 120) }}</p>
+        <input v-model="reportReason" placeholder="举报理由（可留空）" />
+        <div class="row-actions">
+          <button class="ghost" @click="showReport = false">取消</button>
+          <button class="primary" @click="submitReport">提交</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 社群举报队列：社群管理员逐条处置。 -->
+    <div v-if="showReports" class="modal">
+      <div class="sheet">
+        <h3>待决举报</h3>
+        <!-- 每行一条：谁报的、报的是什么、理由。 -->
+        <ul class="picks">
+          <li v-for="r in pendingReports" :key="r.id">
+            <span>{{ r.reporter }} · {{ r.target_kind }} {{ r.target_id.slice(0, 8) }}</span>
+            <span class="muted">{{ r.reason || '（无理由）' }}</span>
+            <span class="mops">
+              <button class="tiny" @click="decideReport(r.id, 'actioned')">删除并结案</button>
+              <button class="tiny" @click="decideReport(r.id, 'dismissed')">驳回</button>
+            </span>
+          </li>
+        </ul>
+        <!-- 空态一句话：队列空着本身就是好消息。 -->
+        <p v-if="!pendingReports.length" class="muted">没有待决举报。</p>
+        <div class="row-actions">
+          <button class="ghost" @click="showReports = false">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 我的处置：针对我的举报与我提过的申诉。 -->
+    <div v-if="showMine" class="modal">
+      <div class="sheet">
+        <h3>我的处置</h3>
+        <!-- 被处置的举报：每条都能申诉一次。 -->
+        <ul class="picks">
+          <li v-for="r in myReports" :key="r.id">
+            <span>#{{ r.id }} · {{ r.status }}</span>
+            <span class="muted">{{ r.reason || '（无理由）' }}</span>
+            <span class="mops">
+              <button class="tiny" @click="submitAppeal(r.id)">申诉</button>
+            </span>
+          </li>
+        </ul>
+        <!-- 没有处置就没什么可申诉的；理由框留在下面，填了再点申诉。 -->
+        <p v-if="!myReports.length" class="muted">没有针对你的处置。</p>
+        <input v-model="appealReason" placeholder="申诉理由（点申诉前填）" />
+        <h4>我的申诉</h4>
+        <!-- 申诉进度：pending / upheld / overturned。 -->
+        <ul class="picks">
+          <li v-for="a in myAppeals" :key="a.id">
+            <span>#{{ a.id }} · 针对举报 {{ a.report_id }}</span>
+            <span class="muted">{{ a.status }}</span>
+          </li>
+        </ul>
+        <p v-if="!myAppeals.length" class="muted">还没提过申诉。</p>
+        <div class="row-actions">
+          <button class="ghost" @click="showMine = false">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 平台申诉队列：只有平台管理员能裁决。 -->
+    <div v-if="showAppeals" class="modal">
+      <div class="sheet">
+        <h3>待决申诉</h3>
+        <!-- 每行一条：谁申诉的、针对哪条举报、理由。 -->
+        <ul class="picks">
+          <li v-for="a in appeals" :key="a.id">
+            <span>{{ a.user }} · 举报 {{ a.report_id }}</span>
+            <span class="muted">{{ a.reason || '（无理由）' }}</span>
+            <span class="mops">
+              <button class="tiny" @click="decideAppeal(a.id, true)">改判</button>
+              <button class="tiny" @click="decideAppeal(a.id, false)">维持</button>
+            </span>
+          </li>
+        </ul>
+        <!-- 空态一句话：没有申诉说明处置没引起争议。 -->
+        <p v-if="!appeals.length" class="muted">没有待决申诉。</p>
+        <div class="row-actions">
+          <button class="ghost" @click="showAppeals = false">关闭</button>
         </div>
       </div>
     </div>

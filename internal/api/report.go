@@ -43,6 +43,45 @@ func (s *Server) handleCreateReport(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{"id": id, "status": "pending"})
 }
 
+// handleMyReports lists the decided reports against the caller. This is the
+// moderated person's side of the queue: what happened, and where to appeal.
+func (s *Server) handleMyReports(w http.ResponseWriter, r *http.Request) {
+	u := userFrom(r.Context())
+	list, err := s.DB.ReportsAgainstMe(r.Context(), u.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "list_failed", err.Error())
+		return
+	}
+	// 字段名就是线上契约：与其余接口一致。
+	out := make([]map[string]any, 0, len(list))
+	for _, rep := range list {
+		out = append(out, map[string]any{
+			"id": rep.ID, "community_id": rep.CommunityID, "reason": rep.Reason,
+			"status": rep.Status, "created_at": rep.CreatedAt,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"reports": out})
+}
+
+// handleMyAppeals lists the appeals the caller filed.
+func (s *Server) handleMyAppeals(w http.ResponseWriter, r *http.Request) {
+	u := userFrom(r.Context())
+	list, err := s.DB.AppealsOfUser(r.Context(), u.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "list_failed", err.Error())
+		return
+	}
+	// 字段名就是线上契约：与其余接口一致。
+	out := make([]map[string]any, 0, len(list))
+	for _, a := range list {
+		out = append(out, map[string]any{
+			"id": a.ID, "report_id": a.ReportID, "reason": a.Reason,
+			"status": a.Status, "created_at": a.CreatedAt,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"appeals": out})
+}
+
 // handleReports lists the pending reports of one community.
 func (s *Server) handleReports(w http.ResponseWriter, r *http.Request) {
 	c, ok := s.communityOf(w, r)

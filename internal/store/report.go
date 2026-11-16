@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strconv"
 	"time"
 )
 
@@ -93,6 +94,52 @@ func (d *DB) DecideReport(ctx context.Context, reportID, actorID int64, status, 
 			reportID, communityID, actorID, action, note, now)
 		return err
 	})
+}
+
+// ReportsAgainstMe lists the decided reports whose target is this user. It is
+// how a moderated person finds out what happened and where to appeal: the
+// community queue is for admins, this one is for the person on the other side.
+func (d *DB) ReportsAgainstMe(ctx context.Context, userID int64) ([]*Report, error) {
+	// target_id 存的是字符串：用户目标的 id 就是 user_id 的十进制写法。
+	// 两种目标都算「针对我」：直接举报我，或者举报了我发的一条消息。
+	rows, err := d.rdb.QueryContext(ctx,
+		"SELECT r.id, r.community_id, r.reporter_id, u.display_name, r.target_kind, r.target_id, r.reason, r.status, r.created_at FROM reports r JOIN users u ON u.id = r.reporter_id WHERE r.status IN ('actioned','escalated','dismissed') AND ((r.target_kind = 'user' AND r.target_id = ?) OR (r.target_kind = 'message' AND r.target_id IN (SELECT id FROM messages WHERE sender_id = ?))) ORDER BY r.id DESC",
+		strconv.FormatInt(userID, 10), userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Report
+	// 逐行扫成结构体；顺序由 SQL 的 ORDER BY 决定。
+	for rows.Next() {
+		r := &Report{}
+		if err := rows.Scan(&r.ID, &r.CommunityID, &r.ReporterID, &r.Reporter, &r.TargetKind, &r.TargetID, &r.Reason, &r.Status, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// AppealsOfUser lists the appeals this user filed, newest first.
+func (d *DB) AppealsOfUser(ctx context.Context, userID int64) ([]*Appeal, error) {
+	rows, err := d.rdb.QueryContext(ctx,
+		"SELECT a.id, a.report_id, a.user_id, u.display_name, a.reason, a.status, a.created_at FROM appeals a JOIN users u ON u.id = a.user_id WHERE a.user_id = ? ORDER BY a.id DESC",
+		userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Appeal
+	// 逐行扫成结构体；顺序由 SQL 的 ORDER BY 决定。
+	for rows.Next() {
+		a := &Appeal{}
+		if err := rows.Scan(&a.ID, &a.ReportID, &a.UserID, &a.User, &a.Reason, &a.Status, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
 }
 
 // ActionsOf returns the moderation actions taken on one report.

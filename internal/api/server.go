@@ -137,6 +137,9 @@ func (s *Server) Router() http.Handler {
 		r.Post("/api/reports/{id}/decide", s.handleDecideReport)
 		r.Get("/api/reports/{id}/actions", s.handleReportActions)
 		// 申诉只走平台：社群管理员看不到其他社群的申诉。
+		// 被处置者的一侧：查针对自己的举报，以及自己提过的申诉。
+		r.Get("/api/reports/mine", s.handleMyReports)
+		r.Get("/api/appeals/mine", s.handleMyAppeals)
 		r.Post("/api/reports/{id}/escalate", s.handleEscalateReport)
 		r.Post("/api/reports/{id}/appeals", s.handleCreateAppeal)
 		// 平台管理员才有申诉与基线的处置权：它们是平台级对象，不是社群级。
